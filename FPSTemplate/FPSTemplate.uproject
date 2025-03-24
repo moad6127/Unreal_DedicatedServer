@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "{EA09037A-4596-D7AD-2D2D-D1A359D37689}",
+	"EngineAssociation": "{491B2E81-444A-7052-2742-FB91F1A5800F}",
 	"Category": "",
 	"Description": "",
 	"Modules": [
@@ -53,6 +53,10 @@
 		{
 			"Name": "PerforceSourceControl",
 			"Enabled": false
+		},
+		{
+			"Name": "GameLiftPlugin",
+			"Enabled": true
 		}
 	]
 }
