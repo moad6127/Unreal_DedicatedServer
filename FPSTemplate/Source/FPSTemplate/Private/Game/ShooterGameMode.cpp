@@ -123,6 +123,9 @@ void AShooterGameMode::InitGameLift()
 
 	UE_LOG(LogShooterGameMode, Log, TEXT("Calling Process Ready"));
 	GameLiftSdkModule->ProcessReady(ProcessParameters);
+
+	//test CreateGameSession
+	//OK;
 }
 
 
