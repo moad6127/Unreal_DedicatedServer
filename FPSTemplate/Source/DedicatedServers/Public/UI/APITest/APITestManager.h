@@ -10,6 +10,9 @@
 /**
  * 
  */
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnListFleetsResponseReceived, const FDSListFleetsResponse&, ListFleetsResponse, bool, bWasSuccessful);
+
 UCLASS()
 class DEDICATEDSERVERS_API UAPITestManager : public UHTTPRequestManager
 {
@@ -17,8 +20,11 @@ class DEDICATEDSERVERS_API UAPITestManager : public UHTTPRequestManager
 	
 	
 public:
+	UPROPERTY()
+	FOnListFleetsResponseReceived OnListFleetsResponseReceived;
+
 	UFUNCTION()
-	void ListFleetsButtonClicked();
+	void ListFleets();
 	
 	void ListFleets_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
 };

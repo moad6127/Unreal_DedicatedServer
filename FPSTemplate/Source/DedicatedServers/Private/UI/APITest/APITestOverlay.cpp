@@ -5,6 +5,10 @@
 #include "UI/API/ListFleets/ListFleetsBox.h"
 #include "UI/APITest/APITestManager.h"
 #include "Components/Button.h"
+#include "Components/ScrollBox.h"
+#include "Components/TextBlock.h"
+#include "UI/HTTP/HTTPRequestTypes.h"
+#include "UI/API/ListFleets/FleetId.h"
 
 void UAPITestOverlay::NativeConstruct()
 {
@@ -16,5 +20,45 @@ void UAPITestOverlay::NativeConstruct()
 
 	check(ListFleetsBox);
 	check(ListFleetsBox->Button_ListFllets);
-	ListFleetsBox->Button_ListFllets->OnClicked.AddDynamic(APITestManager, &UAPITestManager::ListFleetsButtonClicked);
+	ListFleetsBox->Button_ListFllets->OnClicked.AddDynamic(this, &UAPITestOverlay::ListFleetsButtonClicked);
+}
+
+void UAPITestOverlay::ListFleetsButtonClicked()
+{
+	check(APITestManager);
+	APITestManager->OnListFleetsResponseReceived.AddDynamic(this,&UAPITestOverlay::OnListFleetsResponseReceived);
+	APITestManager->ListFleets();
+	ListFleetsBox->Button_ListFllets->SetIsEnabled(false);
+}
+
+void UAPITestOverlay::OnListFleetsResponseReceived(const FDSListFleetsResponse& ListFleetsResponse, bool bWasSuccessful)
+{
+	if (APITestManager->OnListFleetsResponseReceived.IsAlreadyBound(this, &UAPITestOverlay::OnListFleetsResponseReceived))
+	{
+		APITestManager->OnListFleetsResponseReceived.RemoveDynamic(this, &UAPITestOverlay::OnListFleetsResponseReceived);
+	}
+
+	ListFleetsBox->ScrollBox_ListFleets->ClearChildren();
+	if (bWasSuccessful)
+	{
+		for (const FString& FleetId : ListFleetsResponse.FleetIds)
+		{
+			if (FleetIdWidgetClass)
+			{
+				UFleetId* FleetidWidget = CreateWidget<UFleetId>(this, FleetIdWidgetClass);
+				FleetidWidget->TextBlock_FleetId->SetText(FText::FromString(FleetId));
+				ListFleetsBox->ScrollBox_ListFleets->AddChild(FleetidWidget);
+			}
+		}
+	}
+	else
+	{
+		if (FleetIdWidgetClass)
+		{
+			UFleetId* FleetidWidget = CreateWidget<UFleetId>(this, FleetIdWidgetClass);
+			FleetidWidget->TextBlock_FleetId->SetText(FText::FromString("Something went wrong!"));
+			ListFleetsBox->ScrollBox_ListFleets->AddChild(FleetidWidget);
+		}
+	}
+	ListFleetsBox->Button_ListFllets->SetIsEnabled(true);
 }

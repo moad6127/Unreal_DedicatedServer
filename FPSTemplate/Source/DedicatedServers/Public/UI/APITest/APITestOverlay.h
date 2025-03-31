@@ -11,6 +11,9 @@
  */
 class UListFleetsBox;
 class UAPITestManager;
+class UFleetId;
+struct FDSListFleetsResponse;
+
 UCLASS()
 class DEDICATEDSERVERS_API UAPITestOverlay : public UUserWidget
 {
@@ -21,6 +24,8 @@ public:
 	UPROPERTY(EditDefaultsOnly)
 	TSubclassOf<UAPITestManager> APITestManagerClass;
 
+	UPROPERTY(EditDefaultsOnly)
+	TSubclassOf<UFleetId> FleetIdWidgetClass;
 protected:
 	virtual void NativeConstruct() override;
 
@@ -31,4 +36,10 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UAPITestManager> APITestManager;
+
+	UFUNCTION()
+	void ListFleetsButtonClicked();
+
+	UFUNCTION()
+	void OnListFleetsResponseReceived(const FDSListFleetsResponse& ListFleetsResponse, bool bWasSuccessful);
 };

@@ -5,8 +5,12 @@
 #include "HttpModule.h"
 #include "Data/API/APIData.h"
 #include "GameplayTags/DedicatedServersTag.h"
+#include "Interfaces/IHttpResponse.h"
+#include "JsonObjectConverter.h"
+#include "UI/HTTP/HTTPRequestTypes.h"
+#include "DedicatedServers/DedicatedServers.h"
 
-void UAPITestManager::ListFleetsButtonClicked()
+void UAPITestManager::ListFleets()
 {
 
 	check(APIData);
@@ -21,12 +25,27 @@ void UAPITestManager::ListFleetsButtonClicked()
 	Request->SetVerb(TEXT("GET"));
 	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 	Request->ProcessRequest();
-
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("ListFleetsRequestMade"));
-
 }
 
 void UAPITestManager::ListFleets_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
 	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("ListFleetsReponseReceived"));
+
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			OnListFleetsResponseReceived.Broadcast(FDSListFleetsResponse(), false);
+			return;
+		}
+		DumpMetaData(JsonObject);
+
+		FDSListFleetsResponse ListFleetsResponse;
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &ListFleetsResponse);
+		ListFleetsResponse.Dump();
+
+		OnListFleetsResponseReceived.Broadcast(ListFleetsResponse, true);
+	}
 }
