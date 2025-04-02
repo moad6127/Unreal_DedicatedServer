@@ -27,4 +27,11 @@ public:
 private:
 
 	void FindOrCrateGameSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+	void CreatePlayerSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+
+	FString GetUniquePlayerId() const;
+	void HandleGameSessionStatus(const FString& Status, const FString& SessionId);
+	void TryCreatePlayerSession(const FString& PlayerId, const FString& GameSessionId);
+
+	FTimerHandle CreateSessionTimer;
 };
