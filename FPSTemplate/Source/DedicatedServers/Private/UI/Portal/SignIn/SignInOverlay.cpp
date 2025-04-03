@@ -5,6 +5,12 @@
 #include "UI/Portal/PortalManager.h"
 #include "Components/Button.h"
 #include "UI/API/GameSessions/JoinGame.h"
+#include "Components/WidgetSwitcher.h"
+#include "UI/Portal/SignIn/SignInPage.h"
+#include "UI/Portal/SignIn/SignUpPage.h"
+#include "UI/Portal/SignIn/ConfirmSignUpPage.h"
+#include "UI/Portal/SignIn/SuccessConfirmedPage.h"
+
 void USignInOverlay::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -16,6 +22,18 @@ void USignInOverlay::NativeConstruct()
 	PortalManager = NewObject<UPortalManager>(this, PortalManagerClass);
 
 	JoinGameWidget->Button_JoinGame->OnClicked.AddDynamic(this, &USignInOverlay::OnJoinGameButtonClicked);
+
+	//TODO : Test목적의 버튼과 바인드 나중에 삭제
+	check(Button_SignIn_Test);
+	check(Button_SignUp_Test);
+	check(Button_Confirm_Test);
+	check(Button_SuccessConfirmed_Test);
+
+	Button_SignIn_Test->OnClicked.AddDynamic(this, &USignInOverlay::ShowSignInPage);
+	Button_SignUp_Test->OnClicked.AddDynamic(this, &USignInOverlay::ShowSignUpPage);
+	Button_Confirm_Test->OnClicked.AddDynamic(this, &USignInOverlay::ShowConfirmPage);
+	Button_SuccessConfirmed_Test->OnClicked.AddDynamic(this, &USignInOverlay::ShowSuccessConfirmedPage);
+	//TODO : 
 }
 
 void USignInOverlay::OnJoinGameButtonClicked()
@@ -40,4 +58,28 @@ void USignInOverlay::UpdateJoinGameStatusMessage(const FString& StatusMessage, b
 	{
 		JoinGameWidget->Button_JoinGame->SetIsEnabled(true);
 	}
+}
+
+void USignInOverlay::ShowSignInPage()
+{
+	check(IsValid(WidgetSwitcher) && IsValid(SignInPage));
+	WidgetSwitcher->SetActiveWidget(SignInPage);
+}
+
+void USignInOverlay::ShowSignUpPage()
+{
+	check(IsValid(WidgetSwitcher) && IsValid(SignUpPage));
+	WidgetSwitcher->SetActiveWidget(SignUpPage);
+}
+
+void USignInOverlay::ShowConfirmPage()
+{
+	check(IsValid(WidgetSwitcher) && IsValid(ConfirmSignUpPage));
+	WidgetSwitcher->SetActiveWidget(ConfirmSignUpPage);
+}
+
+void USignInOverlay::ShowSuccessConfirmedPage()
+{
+	check(IsValid(WidgetSwitcher) && IsValid(SuccessConfirmedPage));
+	WidgetSwitcher->SetActiveWidget(SuccessConfirmedPage);
 }
