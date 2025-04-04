@@ -28,6 +28,30 @@ void UPortalManager::JoinGameSession()
 	Request->ProcessRequest();
 }
 
+void UPortalManager::SignIn(const FString& UserName, const FString& Password)
+{
+
+}
+
+void UPortalManager::SignUp(const FString& UserName, const FString& Password, const FString& Email)
+{
+
+}
+
+void UPortalManager::Confirm(const FString& ConfirmationCode)
+{
+}
+
+void UPortalManager::QuitGame()
+{
+	APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+	if (IsValid(LocalPlayerController))
+	{
+		UKismetSystemLibrary::QuitGame(this, LocalPlayerController, EQuitPreference::Quit, false);
+	}
+
+}
+
 void UPortalManager::FindOrCrateGameSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
 	if (!bWasSuccessful)

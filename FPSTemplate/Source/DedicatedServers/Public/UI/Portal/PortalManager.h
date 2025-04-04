@@ -24,6 +24,12 @@ public:
 
 	void JoinGameSession();
 	
+	void SignIn(const FString& UserName, const FString& Password);
+	void SignUp(const FString& UserName, const FString& Password, const FString& Email);
+	void Confirm(const FString& ConfirmationCode);
+
+	UFUNCTION()
+	void QuitGame();
 private:
 
 	void FindOrCrateGameSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
