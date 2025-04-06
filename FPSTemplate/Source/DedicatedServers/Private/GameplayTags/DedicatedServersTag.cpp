@@ -9,4 +9,11 @@ namespace DedicatedServersTag
 		UE_DEFINE_GAMEPLAY_TAG_COMMENT(CreatePlayerSession, "DedicatedServersTag.GameSessionsAPI.CreatePlayerSession", "Create Player Session on the GameSessions API")
 
 	}
+	namespace Portal
+	{
+		UE_DEFINE_GAMEPLAY_TAG_COMMENT(SignUp, "DedicatedServersTag.Portal.SignUp", "Create a new User in Portal API")
+		UE_DEFINE_GAMEPLAY_TAG_COMMENT(ConfirmSignUp, "DedicatedServersTag.Portal.ConfirmSignUp", "Confrim a new User in Portal API")
+		UE_DEFINE_GAMEPLAY_TAG_COMMENT(SignIn, "DedicatedServersTag.Portal.SignIn", "Retrieves Access Token, ID Token, and Refresh Token in Portal API")
+
+	}
 }
