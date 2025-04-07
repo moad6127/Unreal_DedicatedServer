@@ -6,6 +6,7 @@
 #include "Components/Button.h"
 #include "UI/API/GameSessions/JoinGame.h"
 #include "Components/WidgetSwitcher.h"
+#include "Components/TextBlock.h"
 #include "UI/Portal/SignIn/SignInPage.h"
 #include "UI/Portal/SignIn/SignUpPage.h"
 #include "UI/Portal/SignIn/ConfirmSignUpPage.h"
@@ -20,59 +21,33 @@ void USignInOverlay::NativeConstruct()
 
 	PortalManager = NewObject<UPortalManager>(this, PortalManagerClass);
 
-	JoinGameWidget->Button_JoinGame->OnClicked.AddDynamic(this, &USignInOverlay::OnJoinGameButtonClicked);
-
-	//TODO : Test목적의 버튼과 바인드 나중에 삭제
-
-	Button_SignIn_Test->OnClicked.AddDynamic(this, &USignInOverlay::ShowSignInPage);
-	Button_SignUp_Test->OnClicked.AddDynamic(this, &USignInOverlay::ShowSignUpPage);
-	Button_Confirm_Test->OnClicked.AddDynamic(this, &USignInOverlay::ShowConfirmPage);
-	Button_SuccessConfirmed_Test->OnClicked.AddDynamic(this, &USignInOverlay::ShowSuccessConfirmedPage);
-	//TODO : 
-
 	/*
 	* SignInPage 변수들 바인드 걸기
 	*/
 	SignInPage->Button_SignIn->OnClicked.AddDynamic(this, &USignInOverlay::SignInButtonClicked);
 	SignInPage->Button_SignUp->OnClicked.AddDynamic(this, &USignInOverlay::ShowSignUpPage);
 	SignInPage->Button_Quit->OnClicked.AddDynamic(PortalManager, &UPortalManager::QuitGame);
-
+	PortalManager->SignInStatusMessageDelegate.AddDynamic(SignInPage, &USignInPage::UpdateStatusMessage);
 	/*
 	* SignUpPage 변수들 바인드 걸기
 	*/
 	SignUpPage->Button_Back->OnClicked.AddDynamic(this, &USignInOverlay::ShowSignInPage);
 	SignUpPage->Button_SignUp->OnClicked.AddDynamic(this, &USignInOverlay::SignUpButtonClicked);
-
+	PortalManager->SignUpStatusMessageDelegate.AddDynamic(SignUpPage, &USignUpPage::UpdateStatusMessage);
+	PortalManager->OnSignUpSucceeded.AddDynamic(this, &USignInOverlay::OnSignUpSucceeded);
 	/*
 	* ConfirmSignUpPage 변수들 바인드 걸기
 	*/
 	ConfirmSignUpPage->Button_Confirm->OnClicked.AddDynamic(this, &USignInOverlay::ConfrimButtonClicked);
 	ConfirmSignUpPage->Button_Back->OnClicked.AddDynamic(this, &USignInOverlay::ShowSignUpPage);
-
+	PortalManager->OnConfirmSucceeded.AddDynamic(this, &USignInOverlay::OnConfirmSucceeded);
+	PortalManager->ConfirmStatusMessageDelegate.AddDynamic(ConfirmSignUpPage, &UConfirmSignUpPage::UpdateStatusMessage);
 	/*
 	* SuccessConfirmedPage 변수들 바인드 걸기
 	*/
 	SuccessConfirmedPage->Button_OK->OnClicked.AddDynamic(this, &USignInOverlay::ShowSignInPage);
 }
 
-void USignInOverlay::OnJoinGameButtonClicked()
-{
-
-	PortalManager->BroadcastJoinGameSessionMessage.AddDynamic(this, &USignInOverlay::UpdateJoinGameStatusMessage);
-	PortalManager->JoinGameSession();
-
-	JoinGameWidget->Button_JoinGame->SetIsEnabled(false);
-}
-
-void USignInOverlay::UpdateJoinGameStatusMessage(const FString& StatusMessage, bool bResetJoinGameButton)
-{
-
-	JoinGameWidget->SetStatusMessage(StatusMessage);
-	if (bResetJoinGameButton)
-	{
-		JoinGameWidget->Button_JoinGame->SetIsEnabled(true);
-	}
-}
 
 void USignInOverlay::ShowSignInPage()
 {
@@ -114,5 +89,20 @@ void USignInOverlay::SignUpButtonClicked()
 void USignInOverlay::ConfrimButtonClicked()
 {
 	const FString ConfirmationCode = ConfirmSignUpPage->TextBox_ConfirmationCode->GetText().ToString();
+	ConfirmSignUpPage->Button_Confirm->SetIsEnabled(false);
 	PortalManager->Confirm(ConfirmationCode);
 }
+
+void USignInOverlay::OnSignUpSucceeded()
+{
+	SignUpPage->ClearTextBoxes();
+	ConfirmSignUpPage->TextBlock_Destination->SetText(FText::FromString(PortalManager->LastSignUpResponse.CodeDeliveryDetails.Destination));
+	ShowConfirmPage();
+}
+
+void USignInOverlay::OnConfirmSucceeded()
+{
+	ConfirmSignUpPage->ClearTextBoxes();
+	ShowSuccessConfirmedPage();
+}
+

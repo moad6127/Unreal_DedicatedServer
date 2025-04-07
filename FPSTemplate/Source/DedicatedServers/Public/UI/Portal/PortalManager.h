@@ -5,13 +5,13 @@
 #include "CoreMinimal.h"
 #include "UI/HTTP/HTTPRequestManager.h"
 #include "Interfaces/IHttpRequest.h"
+#include "UI/HTTP/HTTPRequestTypes.h"
 #include "PortalManager.generated.h"
 
 /**
  * 
  */
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FBroadcastJoinGameSessionMessage, const FString&, SttusMessage,bool, bShouldResetJoinGameButton);
 
 UCLASS()
 class DEDICATEDSERVERS_API UPortalManager : public UHTTPRequestManager
@@ -20,9 +20,19 @@ class DEDICATEDSERVERS_API UPortalManager : public UHTTPRequestManager
 	
 public:
 	UPROPERTY(BlueprintAssignable)
-	FBroadcastJoinGameSessionMessage BroadcastJoinGameSessionMessage;
+	FAPIStatusMessage SignUpStatusMessageDelegate;
 
-	void JoinGameSession();
+	UPROPERTY(BlueprintAssignable)
+	FAPIStatusMessage ConfirmStatusMessageDelegate;
+
+	UPROPERTY(BlueprintAssignable)
+	FAPIStatusMessage SignInStatusMessageDelegate;
+
+	UPROPERTY(BlueprintAssignable)
+	FOnAPIRequestSucceed OnSignUpSucceeded;
+
+	UPROPERTY(BlueprintAssignable)
+	FOnAPIRequestSucceed OnConfirmSucceeded;
 	
 	void SignIn(const FString& UserName, const FString& Password);
 	void SignUp(const FString& UserName, const FString& Password, const FString& Email);
@@ -30,14 +40,12 @@ public:
 
 	UFUNCTION()
 	void QuitGame();
+
+	FDSSignUpResponse LastSignUpResponse;
+	FString LastUserName;
 private:
 
-	void FindOrCrateGameSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
-	void CreatePlayerSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
-
-	FString GetUniquePlayerId() const;
-	void HandleGameSessionStatus(const FString& Status, const FString& SessionId);
-	void TryCreatePlayerSession(const FString& PlayerId, const FString& GameSessionId);
-
-	FTimerHandle CreateSessionTimer;
+	void SignUp_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+	void Confirm_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+	void SignIn_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
 };
