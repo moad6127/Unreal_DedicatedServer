@@ -9,6 +9,7 @@
 #include "JsonObjectConverter.h"
 #include "GameFramework/PlayerState.h"
 #include "Kismet/GameplayStatics.h"
+#include "Player/DSLocalPlayerSubssytem.h"
 
 
 void UPortalManager::SignIn(const FString& UserName, const FString& Password)
@@ -53,9 +54,15 @@ void UPortalManager::SignIn_Response(FHttpRequestPtr Request, FHttpResponsePtr R
 		FDSInitiateAuthResponse InitiateAuthResponse;
 
 		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &InitiateAuthResponse);
-		InitiateAuthResponse.Dump();
+		
+		UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem();
+		if (IsValid(LocalPlayerSubSystem))
+		{
+			LocalPlayerSubSystem->InitializeTokens(InitiateAuthResponse.AuthenticationResult,this);
+		}
 	}
 }
+
 
 void UPortalManager::SignUp(const FString& UserName, const FString& Password, const FString& Email)
 {
@@ -129,6 +136,7 @@ void UPortalManager::Confirm(const FString& ConfirmationCode)
 	Request->ProcessRequest();
 }
 
+
 void UPortalManager::Confirm_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
 	if (!bWasSuccessful)
@@ -159,6 +167,53 @@ void UPortalManager::Confirm_Response(FHttpRequestPtr Request, FHttpResponsePtr 
 
 }
 
+void UPortalManager::RefreshTokens(const FString& RefreshToken)
+{
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &UPortalManager::RefreshTokens_Response);
+
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::Portal::SignIn);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	TMap<FString, FString> ContentParams = {
+		{TEXT("refreshToken"),RefreshToken}
+	};
+	const FString Content = SerializeJsonContent(ContentParams);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+
+void UPortalManager::RefreshTokens_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		return;
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			return;
+		}
+		FDSInitiateAuthResponse InitiateAuthResponse;
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &InitiateAuthResponse);
+
+		UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem();
+		if (IsValid(LocalPlayerSubSystem))
+		{
+			LocalPlayerSubSystem->UpdateToken(
+				InitiateAuthResponse.AuthenticationResult.AccessToken,
+				InitiateAuthResponse.AuthenticationResult.IdToken);
+		}
+	}
+}
 
 void UPortalManager::QuitGame()
 {
