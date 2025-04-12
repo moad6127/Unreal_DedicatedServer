@@ -3,6 +3,7 @@
 
 #include "UI/Portal/PortalHUD.h"
 #include "UI/Portal/SignIn/SignInOverlay.h"
+#include "UI/Portal/Dashboard/DashboardOverlay.h"
 
 
 void APortalHUD::BeginPlay()
@@ -20,4 +21,18 @@ void APortalHUD::BeginPlay()
 	OwningPlayerController->SetInputMode(InputMode);
 	OwningPlayerController->SetShowMouseCursor(true);
 
+}
+
+void APortalHUD::OnSignIn()
+{
+	if (IsValid(SignInOverlay))
+	{
+		SignInOverlay->RemoveFromParent();
+	}
+	APlayerController* OwningPlayerController = GetOwningPlayerController();
+	DashboardOverlay = CreateWidget<UDashboardOverlay>(OwningPlayerController, DashboardOverlayClass);
+	if (IsValid(DashboardOverlay))
+	{
+		DashboardOverlay->AddToViewport();
+	}
 }

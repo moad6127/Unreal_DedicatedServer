@@ -2,4 +2,34 @@
 
 
 #include "UI/Portal/Dashboard/DashboardOverlay.h"
+#include "Components/WidgetSwitcher.h"
+#include "UI/Portal/Dashboard/GamePage.h"
+#include "UI/Portal/Dashboard/CareerPage.h"
+#include "UI/Portal/Dashboard/LeaderboardPage.h"
+#include "Components/Button.h"
 
+void UDashboardOverlay::NativeConstruct()
+{
+	Super::NativeConstruct();
+
+	Button_Game->OnClicked.AddDynamic(this, &UDashboardOverlay::ShowGamePage);
+	Button_Career->OnClicked.AddDynamic(this, &UDashboardOverlay::ShowCarrerPage);
+	Button_Leaderboard->OnClicked.AddDynamic(this, &UDashboardOverlay::ShowLeaderboardPage);
+
+	ShowGamePage();
+}
+
+void UDashboardOverlay::ShowGamePage()
+{
+	WidgetSwitcher->SetActiveWidget(GamePage);
+}
+
+void UDashboardOverlay::ShowCarrerPage()
+{
+	WidgetSwitcher->SetActiveWidget(CareerPage);
+}
+
+void UDashboardOverlay::ShowLeaderboardPage()
+{
+	WidgetSwitcher->SetActiveWidget(LeaderboardPage);
+}

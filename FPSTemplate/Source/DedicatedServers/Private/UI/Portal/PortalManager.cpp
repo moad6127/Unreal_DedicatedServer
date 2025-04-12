@@ -10,6 +10,7 @@
 #include "GameFramework/PlayerState.h"
 #include "Kismet/GameplayStatics.h"
 #include "Player/DSLocalPlayerSubssytem.h"
+#include "UI/Portal/PortalHUD.h"
 
 
 void UPortalManager::SignIn(const FString& UserName, const FString& Password)
@@ -59,6 +60,16 @@ void UPortalManager::SignIn_Response(FHttpRequestPtr Request, FHttpResponsePtr R
 		if (IsValid(LocalPlayerSubSystem))
 		{
 			LocalPlayerSubSystem->InitializeTokens(InitiateAuthResponse.AuthenticationResult,this);
+		}
+
+		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+		if (IsValid(LocalPlayerController))
+		{
+			APortalHUD* PortalHUD = Cast<APortalHUD>(LocalPlayerController->GetHUD());
+			if (IsValid(PortalHUD))
+			{
+				PortalHUD->OnSignIn();
+			}
 		}
 	}
 }
