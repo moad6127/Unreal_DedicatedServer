@@ -156,13 +156,13 @@ struct FDSCodeDeliveryDetails
 	GENERATED_BODY()
 
 	UPROPERTY()
-	FString AttributeName;
+	FString AttributeName{};
 
 	UPROPERTY()
-	FString DeliveryMedium;
+	FString DeliveryMedium{};
 
 	UPROPERTY()
-	FString Destination;
+	FString Destination{};
 
 	void Dump() const;
 };
@@ -173,16 +173,16 @@ struct FDSSignUpResponse
 	GENERATED_BODY()
 
 	UPROPERTY()
-	FDSCodeDeliveryDetails CodeDeliveryDetails;
+	FDSCodeDeliveryDetails CodeDeliveryDetails{};
 
 	UPROPERTY()
-	bool UserConfirmed;
+	bool UserConfirmed{};
 
 	UPROPERTY()
-	FString Session;
+	FString Session{};
 
 	UPROPERTY()
-	FString UserSub;
+	FString UserSub{};
 
 	void Dump() const;
 };
@@ -193,10 +193,10 @@ struct FDSNewDeviceMetaData
 	GENERATED_BODY()
 
 	UPROPERTY()
-	FString DeviceGroupKey;
+	FString DeviceGroupKey{};
 
 	UPROPERTY()
-	FString DeviceKey;
+	FString DeviceKey{};
 
 	void Dump() const;
 };
@@ -207,22 +207,22 @@ struct FDSAuthenticationResult
 	GENERATED_BODY()
 
 	UPROPERTY()
-	FString AccessToken;
+	FString AccessToken{};
 
 	UPROPERTY()
-	int32 ExpiresIn;
+	int32 ExpiresIn{};
 
 	UPROPERTY()
-	FString IdToken;
+	FString IdToken{};
 
 	UPROPERTY()
-	FDSNewDeviceMetaData NewDeviceMetadata;
+	FDSNewDeviceMetaData NewDeviceMetadata{};
 
 	UPROPERTY()
-	FString RefreshToken;
+	FString RefreshToken{};
 
 	UPROPERTY()
-	FString TokenType;
+	FString TokenType{};
 
 	void Dump() const;
 };
@@ -234,7 +234,7 @@ struct FDSChallengeParameters
 	GENERATED_BODY()
 
 	UPROPERTY()
-	TMap<FString, FString> Parameters;
+	TMap<FString, FString> Parameters{};
 
 	void Dump() const;
 };
@@ -245,19 +245,22 @@ struct FDSInitiateAuthResponse
 	GENERATED_BODY()
 
 	UPROPERTY()
-	FDSAuthenticationResult AuthenticationResult;
+	FDSAuthenticationResult AuthenticationResult{};
 
 	UPROPERTY()
-	TArray<FString> AvailableChallenges;
+	TArray<FString> AvailableChallenges{};
 
 	UPROPERTY()
-	FString ChallengeName;
+	FString ChallengeName{};
 
 	UPROPERTY()
-	FDSChallengeParameters ChallengeParameters;
+	FDSChallengeParameters ChallengeParameters{};
 
 	UPROPERTY()
-	FString Session;
+	FString Session{};
+
+	UPROPERTY()
+	FString email{};
 
 	void Dump() const;
 };
