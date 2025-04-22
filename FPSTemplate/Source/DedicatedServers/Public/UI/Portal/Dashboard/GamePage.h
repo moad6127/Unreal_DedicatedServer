@@ -9,12 +9,28 @@
 /**
  * 
  */
+class UJoinGame;
+class UGameSessionsManager;
+
 UCLASS()
 class DEDICATEDSERVERS_API UGamePage : public UUserWidget
 {
 	GENERATED_BODY()
 	
+public:
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UJoinGame> JoinGameWidet;
 	
-	
-	
+	UPROPERTY(EditDefaultsOnly)
+	TSubclassOf<UGameSessionsManager> GameSessionsManagerClass;
+
+protected:
+	virtual void NativeConstruct() override;
+
+private:
+	UFUNCTION()
+	void JoinGameButtonClicked();
+
+	UPROPERTY()
+	TObjectPtr<UGameSessionsManager> GameSessionsManager;
 };

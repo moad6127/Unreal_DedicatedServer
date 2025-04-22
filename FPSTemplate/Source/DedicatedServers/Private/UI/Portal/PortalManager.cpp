@@ -10,7 +10,8 @@
 #include "GameFramework/PlayerState.h"
 #include "Kismet/GameplayStatics.h"
 #include "Player/DSLocalPlayerSubssytem.h"
-#include "UI/Portal/PortalHUD.h"
+#include "UI/Interfaces/HUDManagement.h"
+#include "GameFramework/HUD.h"
 
 
 void UPortalManager::SignIn(const FString& UserName, const FString& Password)
@@ -68,10 +69,9 @@ void UPortalManager::SignIn_Response(FHttpRequestPtr Request, FHttpResponsePtr R
 		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
 		if (IsValid(LocalPlayerController))
 		{
-			APortalHUD* PortalHUD = Cast<APortalHUD>(LocalPlayerController->GetHUD());
-			if (IsValid(PortalHUD))
+			if (IHUDManagement* HUDManagement = Cast<IHUDManagement>(LocalPlayerController->GetHUD()))
 			{
-				PortalHUD->OnSignIn();
+				HUDManagement->OnSignIn();
 			}
 		}
 	}
@@ -263,6 +263,14 @@ void UPortalManager::SignOut_Response(FHttpRequestPtr Request, FHttpResponsePtr 
 		if (ContainsErrors(JsonObject))
 		{
 			return;
+		}
+		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+		if (IsValid(LocalPlayerController))
+		{
+			if (IHUDManagement* HUDManagement = Cast<IHUDManagement>(LocalPlayerController->GetHUD()))
+			{
+				HUDManagement->OnSignOut();
+			}
 		}
 	}
 
