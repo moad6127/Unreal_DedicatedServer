@@ -4,11 +4,15 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Types/DSTypes.h"
 #include "DSPlayerController.generated.h"
 
 /**
  * 
  */
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTimerStateChagnedDelegate, float, Time, ECountdownTimerType, Type);
+
 UCLASS()
 class DEDICATEDSERVERS_API ADSPlayerController : public APlayerController
 {
@@ -18,6 +22,26 @@ public:
 
 	ADSPlayerController();
 	virtual void ReceivedPlayer() override;
+
+	UFUNCTION(Client, Reliable)
+	void Client_TimerUpdated(float CountdownTimeLeft, ECountdownTimerType Type) const;
+
+	UFUNCTION(Client, Reliable)
+	void Client_TimerStopped(float CountdownTimeLeft, ECountdownTimerType Type) const;
+
+	UPROPERTY(BlueprintAssignable)
+	FOnTimerStateChagnedDelegate OnTimerUpdated;
+
+	UPROPERTY(BlueprintAssignable)
+	FOnTimerStateChagnedDelegate OnTimerStopped;
+
+	/*	
+	UPROPERTY(BlueprintAssignable)
+	FOnTimerStateChagnedDelegate OnTimerPaused;
+
+	UPROPERTY(BlueprintAssignable)
+	FOnTimerStateChagnedDelegate OnTimerResumed;
+	*/
 
 protected:
 	

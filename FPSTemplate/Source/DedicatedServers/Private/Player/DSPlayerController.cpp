@@ -23,6 +23,17 @@ void ADSPlayerController::ReceivedPlayer()
 	}
 }
 
+
+void ADSPlayerController::Client_TimerUpdated_Implementation(float CountdownTimeLeft, ECountdownTimerType Type) const
+{
+	OnTimerUpdated.Broadcast(CountdownTimeLeft - SingleTripTime, Type);
+}
+
+void ADSPlayerController::Client_TimerStopped_Implementation(float CountdownTimeLeft, ECountdownTimerType Type) const
+{
+	OnTimerStopped.Broadcast(CountdownTimeLeft - SingleTripTime, Type);
+}
+
 void ADSPlayerController::Server_Ping_Implementation(float TimeOfRequest)
 {
 	Clinet_Pong(TimeOfRequest);
