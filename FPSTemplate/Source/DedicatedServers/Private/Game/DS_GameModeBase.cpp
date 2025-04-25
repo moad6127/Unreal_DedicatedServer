@@ -1,7 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Game/DSGameModeBase.h"
+#include "Game/DS_GameModeBase.h"
 #include "Player/DSPlayerController.h"
 
 void ADSGameModeBase::StartCountdownTimer(FCountdownTimerHandle& CountdownTimerHandle)
@@ -20,23 +20,14 @@ void ADSGameModeBase::StartCountdownTimer(FCountdownTimerHandle& CountdownTimerH
 
 	CountdownTimerHandle.TimerUpdateDelegate.BindWeakLambda(this, [&]()
 		{
-			for (FConstPlayerControllerIterator iterator = GetWorld()->GetPlayerControllerIterator(); iterator; ++iterator)
-			{
-				ADSPlayerController* DSPlayerController = Cast<ADSPlayerController>(iterator->Get());
-				if (IsValid(DSPlayerController))
-				{
-					const float CountdownTimeLeft =
-						CountdownTimerHandle.CountdownTime
-						- GetWorldTimerManager().GetTimerElapsed(CountdownTimerHandle.TimerFinishHandle);
-					DSPlayerController->Client_TimerUpdated(CountdownTimeLeft, CountdownTimerHandle.Type);
-				}
-			}
+			UpdateCountdownTimer(CountdownTimerHandle);
 		});
 	GetWorldTimerManager().SetTimer(
 		CountdownTimerHandle.TimerUpdateHandle,
 		CountdownTimerHandle.TimerUpdateDelegate,
 		CountdownTimerHandle.CountdownUpdateInterval,
 		true);
+	UpdateCountdownTimer(CountdownTimerHandle);
 }
 
 void ADSGameModeBase::StopCountdownTimer(FCountdownTimerHandle& CountdownTimerHandle)
@@ -62,6 +53,21 @@ void ADSGameModeBase::StopCountdownTimer(FCountdownTimerHandle& CountdownTimerHa
 		}
 	}
 
+}
+
+void ADSGameModeBase::UpdateCountdownTimer(const FCountdownTimerHandle& CountdownTimerHandle)
+{
+	for (FConstPlayerControllerIterator iterator = GetWorld()->GetPlayerControllerIterator(); iterator; ++iterator)
+	{
+		ADSPlayerController* DSPlayerController = Cast<ADSPlayerController>(iterator->Get());
+		if (IsValid(DSPlayerController))
+		{
+			const float CountdownTimeLeft =
+				CountdownTimerHandle.CountdownTime
+				- GetWorldTimerManager().GetTimerElapsed(CountdownTimerHandle.TimerFinishHandle);
+			DSPlayerController->Client_TimerUpdated(CountdownTimeLeft, CountdownTimerHandle.Type);
+		}
+	}
 }
 
 void ADSGameModeBase::OnCountdownTimerFinished(ECountdownTimerType Type)

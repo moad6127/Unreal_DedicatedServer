@@ -93,7 +93,7 @@ void UTimerWidget::TimerStopped()
 	UpdateCountdown(0.f);
 	if (bHiddenWhenInactive)
 	{
-		TextBlock_Timer->SetRenderOpacity(1.f);
+		TextBlock_Timer->SetRenderOpacity(0.f);
 	}
 
 }
