@@ -5,12 +5,70 @@
 #include "Game/DS_GameInstanceSubSystem.h"
 #include "DedicatedServers/DedicatedServers.h"
 
+
+ADS_LobbyGameMode::ADS_LobbyGameMode()
+{
+	bUseSeamlessTravel = true;
+	LobbyStatus = ELobbyStatus::WaitingForPlayers;
+	MinPlayer = 1;
+	LobbyCountdownTimerHandle.Type = ECountdownTimerType::LobbyCountdown;
+}
+
+void ADS_LobbyGameMode::PostLogin(APlayerController* NewPlayer)
+{
+	Super::PostLogin(NewPlayer);
+	CheckAndStartLobbyCountdown();
+}
+
+void ADS_LobbyGameMode::InitSeamlessTravelPlayer(AController* NewPlayer)
+{
+	//Seamless는 PostLogin을 호출하지 않기 때문에 이함수를 Override해서 사용한다.
+
+	Super::InitSeamlessTravelPlayer(NewPlayer);
+	CheckAndStartLobbyCountdown();
+}
+
+void ADS_LobbyGameMode::Logout(AController* Exiting)
+{
+	Super::Logout(Exiting);
+	CheckAndStopLobbyCountdown();
+}
+
+void ADS_LobbyGameMode::CheckAndStartLobbyCountdown()
+{
+
+	if (GetNumPlayers() >= MinPlayer && LobbyStatus == ELobbyStatus::WaitingForPlayers)
+	{
+		LobbyStatus = ELobbyStatus::CountdownToSeamlessTravel;
+		StartCountdownTimer(LobbyCountdownTimerHandle);
+	}
+}
+
+void ADS_LobbyGameMode::CheckAndStopLobbyCountdown()
+{
+	if (GetNumPlayers() - 1 < MinPlayer && LobbyStatus == ELobbyStatus::CountdownToSeamlessTravel)
+	{
+		LobbyStatus = ELobbyStatus::WaitingForPlayers;
+		StopCountdownTimer(LobbyCountdownTimerHandle);
+	}
+}
+
 void ADS_LobbyGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
 	InitGameLift();
 
+}
+
+void ADS_LobbyGameMode::OnCountdownTimerFinished(ECountdownTimerType Type)
+{
+	Super::OnCountdownTimerFinished(Type);
+	if (Type == ECountdownTimerType::LobbyCountdown)
+	{
+		LobbyStatus = ELobbyStatus::SeamlessTraveling;
+		TrySeamlessTravel(DestinationMap);
+	}
 }
 
 void ADS_LobbyGameMode::InitGameLift()
