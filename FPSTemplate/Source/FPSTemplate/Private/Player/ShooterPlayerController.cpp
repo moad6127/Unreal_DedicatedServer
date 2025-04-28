@@ -12,6 +12,7 @@ AShooterPlayerController::AShooterPlayerController()
 {
 	bReplicates = true;
 	bPawnAlive = true;
+	bQuitMenuOpen = false;
 }
 
 void AShooterPlayerController::OnPossess(APawn* InPawn)
@@ -24,6 +25,24 @@ void AShooterPlayerController::OnRep_PlayerState()
 {
 	Super::OnRep_PlayerState();
 	OnPlayerStateReplicated.Broadcast();
+}
+
+void AShooterPlayerController::EnableInput(APlayerController* PlayerController)
+{
+	Super::EnableInput(PlayerController);
+	if (IsValid(GetPawn()) && GetPawn()->Implements<UPlayerInterface>())
+	{
+		IPlayerInterface::Execute_EnableGameActions(GetPawn(), true);
+	}
+}
+
+void AShooterPlayerController::DisableInput(APlayerController* PlayerController)
+{
+	Super::DisableInput(PlayerController);
+	if (IsValid(GetPawn()) && GetPawn()->Implements<UPlayerInterface>())
+	{
+		IPlayerInterface::Execute_EnableGameActions(GetPawn(), false);
+	}
 }
 
 void AShooterPlayerController::BeginPlay()
@@ -46,7 +65,8 @@ void AShooterPlayerController::SetupInputComponent()
 	ShooterInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AShooterPlayerController::Input_Look);
 	ShooterInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &AShooterPlayerController::Input_Crouch);
 	ShooterInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AShooterPlayerController::Input_Jump);
-	
+	ShooterInputComponent->BindAction(QuitAction, ETriggerEvent::Started, this, &AShooterPlayerController::Input_Quit);
+
 }
 
 void AShooterPlayerController::Input_Move(const FInputActionValue& InputActionValue)
@@ -85,6 +105,23 @@ void AShooterPlayerController::Input_Jump()
 	if (!bPawnAlive) return;
 	if (GetPawn() == nullptr || !GetPawn()->Implements<UPlayerInterface>()) return;
 	IPlayerInterface::Execute_Initiate_Jump(GetPawn());
+}
+
+void AShooterPlayerController::Input_Quit()
+{
+	bQuitMenuOpen = !bQuitMenuOpen;
+	if (bQuitMenuOpen)
+	{
+		FInputModeGameAndUI InputMode;
+		SetInputMode(InputMode);
+	}
+	else
+	{
+		FInputModeGameOnly InputMode;
+		SetInputMode(InputMode);
+	}
+	SetShowMouseCursor(bQuitMenuOpen);
+	OnQuitMenuOpen.Broadcast(bQuitMenuOpen);
 }
 
 

@@ -27,6 +27,8 @@ public:
 protected:
 	virtual void OnCountdownTimerFinished(ECountdownTimerType Type) override;
 
+	void SetClientInuptEnabled(bool bEnabled);
+
 	UPROPERTY(EditDefaultsOnly)
 	FCountdownTimerHandle PreMatchTimer;
 

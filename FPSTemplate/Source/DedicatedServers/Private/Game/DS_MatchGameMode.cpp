@@ -2,6 +2,7 @@
 
 
 #include "Game/DS_MatchGameMode.h"
+#include "Player/DSPlayerController.h"
 
 ADS_MatchGameMode::ADS_MatchGameMode()
 {
@@ -31,15 +32,29 @@ void ADS_MatchGameMode::OnCountdownTimerFinished(ECountdownTimerType Type)
 	{
 		DS_MatchStatus = EMatchStatus::Match;
 		StartCountdownTimer(MatchTimer);
+		SetClientInuptEnabled(true);
 	}
 	if (Type == ECountdownTimerType::Match)
 	{
 		DS_MatchStatus = EMatchStatus::PostMatch;
 		StartCountdownTimer(PostMatchTimer);
+		SetClientInuptEnabled(false);
 	}
 	if (Type == ECountdownTimerType::PostMatch)
 	{
 		DS_MatchStatus = EMatchStatus::SeamlessTravelling;
 		TrySeamlessTravel(LobbyMap);
+	}
+}
+
+void ADS_MatchGameMode::SetClientInuptEnabled(bool bEnabled)
+{
+	for (FConstPlayerControllerIterator iterator = GetWorld()->GetPlayerControllerIterator(); iterator; ++iterator)
+	{
+		ADSPlayerController* DSPlayerController = Cast<ADSPlayerController>(iterator->Get());
+		if (IsValid(DSPlayerController))
+		{
+			DSPlayerController->Client_SetInputEnabled(bEnabled);
+		}
 	}
 }

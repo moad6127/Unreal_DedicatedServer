@@ -31,10 +31,13 @@ protected:
 
 	FString FormatTimeAsString(float TimeSeconds) const;
 
-	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "OnTimerUpdated"))
+	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Timer Updated"))
 	void K2_OnTimerUpdated(float Time, ECountdownTimerType Type);
 
-	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "OnTimerStopped"))
+	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Timer Started"))
+	void K2_OnTimerStarted(float Time, ECountdownTimerType Type);
+
+	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Timer Stopped"))
 	void K2_OnTimerStopped(float Time, ECountdownTimerType Type);
 
 	UPROPERTY(BlueprintReadOnly,EditDefaultsOnly)
