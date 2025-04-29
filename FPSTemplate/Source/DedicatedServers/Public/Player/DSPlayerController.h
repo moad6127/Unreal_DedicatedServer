@@ -45,6 +45,12 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FOnTimerStateChagnedDelegate OnTimerStopped;
 
+	UPROPERTY(BlueprintReadOnly)
+	FString Username;
+
+	UPROPERTY(BlueprintReadOnly)
+	FString PlayerSessionId;
+
 	/*	
 	UPROPERTY(BlueprintAssignable)
 	FOnTimerStateChagnedDelegate OnTimerPaused;

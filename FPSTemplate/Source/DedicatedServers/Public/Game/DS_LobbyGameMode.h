@@ -27,6 +27,9 @@ protected:
 	virtual void OnCountdownTimerFinished(ECountdownTimerType Type) override;
 	virtual void InitSeamlessTravelPlayer(AController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
+	virtual void PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage) override;
+	virtual FString InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal = TEXT("")) override;
+
 	void CheckAndStopLobbyCountdown();
 	UPROPERTY()
 	ELobbyStatus LobbyStatus;
@@ -39,7 +42,8 @@ protected:
 private:
 	void InitGameLift();
 	void SetServerParameters(FServerParameters& OutServerParameters);
-
+	void TryAcceptPlayerSession(const FString& PlayerSessionId, const FString& Username, FString& OutErrorMessage);
+	
 	UPROPERTY()
 	TObjectPtr<UDS_GameInstanceSubSystem> DSGameInstanceSubSystem;
 

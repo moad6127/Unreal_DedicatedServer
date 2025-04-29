@@ -104,9 +104,11 @@ void UGameSessionsManager::CreatePlayerSession_Response(FHttpRequestPtr Request,
 			LocalPlayerController->SetShowMouseCursor(false);
 		}
 
+		const FString Options = "?PlayerSessionId=" + PlayerSesssion.PlayerSessionId + "?Username=" + PlayerSesssion.PlayerId;
+
 		const FString IPAndPort = PlayerSesssion.IpAddress + TEXT(":") + FString::FromInt(PlayerSesssion.Port);
 		const FName Address(*IPAndPort);
-		UGameplayStatics::OpenLevel(this, Address);
+		UGameplayStatics::OpenLevel(this, Address, true, Options);
 	}
 }
 
@@ -117,7 +119,11 @@ void UGameSessionsManager::HandleGameSessionStatus(const FString& Status, const 
 	if (Status.Equals(TEXT("ACTIVE")))
 	{
 		BroadcastJoinGameSessionMessage.Broadcast(TEXT("Found active Game Session. Creating a Player Session..."), false);
-		TryCreatePlayerSession(GetUniquePlayerId(), SessionId);
+		
+		if (UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem(); IsValid(LocalPlayerSubSystem))
+		{
+			TryCreatePlayerSession(LocalPlayerSubSystem->UserName, SessionId);
+		}	
 	}
 	else if (Status.Equals(TEXT("ACTIVATING"))) // ACTIVATING 상태이면 잠시후 Join함수를 다시 실행하도록 만들기
 	{

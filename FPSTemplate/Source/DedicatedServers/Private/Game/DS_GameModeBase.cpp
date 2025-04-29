@@ -4,6 +4,7 @@
 #include "Game/DS_GameModeBase.h"
 #include "Player/DSPlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameLiftServerSDK.h"
 
 void ADSGameModeBase::StartCountdownTimer(FCountdownTimerHandle& CountdownTimerHandle)
 {
@@ -88,4 +89,22 @@ void ADSGameModeBase::TrySeamlessTravel(TSoftObjectPtr<UWorld> DestinationMap)
 		//ServerTravel is not supported in the editor, so we need to use OpenLevel instead.
 		GetWorld()->ServerTravel(MapName);
 	}
+}
+
+void ADSGameModeBase::RemovePlayerSession(AController* Exiting)
+{
+	ADSPlayerController* DSPlayerController = Cast<ADSPlayerController>(Exiting);
+	if (!IsValid(DSPlayerController))
+	{
+		return;
+	}
+	//
+#if WITH_GAMELIFT
+	const FString& PlayerSessionID = DSPlayerController->PlayerSessionId;
+	if (!PlayerSessionID.IsEmpty())
+	{
+		Aws::GameLift::Server::RemovePlayerSession(TCHAR_TO_ANSI(*PlayerSessionID));
+	}
+	//
+#endif
 }
