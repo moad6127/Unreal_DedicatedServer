@@ -10,7 +10,6 @@ void ADSGameModeBase::StartCountdownTimer(FCountdownTimerHandle& CountdownTimerH
 {
 	CountdownTimerHandle.TimerFinishDelegate.BindWeakLambda(this, [&]()
 		{
-			StopCountdownTimer(CountdownTimerHandle);
 			OnCountdownTimerFinished(CountdownTimerHandle.Type);
 		});
 

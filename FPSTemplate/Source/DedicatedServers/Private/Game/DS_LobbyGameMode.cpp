@@ -20,6 +20,7 @@ void ADS_LobbyGameMode::PostLogin(APlayerController* NewPlayer)
 {
 	Super::PostLogin(NewPlayer);
 	CheckAndStartLobbyCountdown();
+	UE_LOG(LogTemp, Warning, TEXT("ADS_LobbyGameMode::PostLogin for %s"), *NewPlayer->GetName());
 }
 
 void ADS_LobbyGameMode::InitSeamlessTravelPlayer(AController* NewPlayer)
@@ -28,6 +29,8 @@ void ADS_LobbyGameMode::InitSeamlessTravelPlayer(AController* NewPlayer)
 
 	Super::InitSeamlessTravelPlayer(NewPlayer);
 	CheckAndStartLobbyCountdown();
+	UE_LOG(LogTemp, Warning, TEXT("ADS_LobbyGameMode::InitSeamlessTravelPlayer for %s"), *NewPlayer->GetName());
+
 }
 
 void ADS_LobbyGameMode::Logout(AController* Exiting)
@@ -36,6 +39,8 @@ void ADS_LobbyGameMode::Logout(AController* Exiting)
 	CheckAndStopLobbyCountdown();
 
 	RemovePlayerSession(Exiting);
+	UE_LOG(LogTemp, Warning, TEXT("ADS_LobbyGameMode::Logout for %s"), *Exiting->GetName());
+
 }
 
 FString ADS_LobbyGameMode::InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId, const FString& Options, const FString& Portal)
@@ -50,6 +55,7 @@ FString ADS_LobbyGameMode::InitNewPlayer(APlayerController* NewPlayerController,
 		DSPlayerController->PlayerSessionId = PlayerSessionId;
 		DSPlayerController->Username = Username;
 	}
+	UE_LOG(LogTemp, Warning, TEXT("ADS_LobbyGameMode::InitNewPlayer - PlayerSessionId : %s, Username : %s"), *PlayerSessionId, *Username);
 
 	return InitializedString;
 }
@@ -62,6 +68,8 @@ void ADS_LobbyGameMode::PreLogin(const FString& Options, const FString& Address,
 	const FString Username = UGameplayStatics::ParseOption(Options, TEXT("Username"));
 
 	TryAcceptPlayerSession(PlayerSessionId, Username, ErrorMessage);
+	UE_LOG(LogTemp, Warning, TEXT("ADS_LobbyGameMode::PreLogin - PlayerSessionId : %s, Username : %s"), *PlayerSessionId, *Username);
+
 }
 
 void ADS_LobbyGameMode::TryAcceptPlayerSession(const FString& PlayerSessionId, const FString& Username, FString& OutErrorMessage)
@@ -141,6 +149,7 @@ void ADS_LobbyGameMode::OnCountdownTimerFinished(ECountdownTimerType Type)
 	Super::OnCountdownTimerFinished(Type);
 	if (Type == ECountdownTimerType::LobbyCountdown)
 	{
+		StopCountdownTimer(LobbyCountdownTimerHandle);
 		LobbyStatus = ELobbyStatus::SeamlessTraveling;
 		TrySeamlessTravel(DestinationMap);
 	}

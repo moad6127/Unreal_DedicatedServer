@@ -31,24 +31,38 @@ void ADS_MatchGameMode::Logout(AController* Exiting)
 	RemovePlayerSession(Exiting);
 }
 
+void ADS_MatchGameMode::InitSeamlessTravelPlayer(AController* NewPlayer)
+{
+	Super::InitSeamlessTravelPlayer(NewPlayer);
+
+	if (DS_MatchStatus == EMatchStatus::WaitingForPlayers)
+	{
+		DS_MatchStatus = EMatchStatus::PreMatch;
+		StartCountdownTimer(PreMatchTimer);
+	}
+}
+
 void ADS_MatchGameMode::OnCountdownTimerFinished(ECountdownTimerType Type)
 {
 	Super::OnCountdownTimerFinished(Type);
 
 	if (Type == ECountdownTimerType::PreMatch)
 	{
+		StopCountdownTimer(PreMatchTimer);
 		DS_MatchStatus = EMatchStatus::Match;
 		StartCountdownTimer(MatchTimer);
 		SetClientInuptEnabled(true);
 	}
 	if (Type == ECountdownTimerType::Match)
 	{
+		StopCountdownTimer(MatchTimer);
 		DS_MatchStatus = EMatchStatus::PostMatch;
 		StartCountdownTimer(PostMatchTimer);
 		SetClientInuptEnabled(false);
 	}
 	if (Type == ECountdownTimerType::PostMatch)
 	{
+		StopCountdownTimer(PostMatchTimer);
 		DS_MatchStatus = EMatchStatus::SeamlessTravelling;
 		TrySeamlessTravel(LobbyMap);
 	}
