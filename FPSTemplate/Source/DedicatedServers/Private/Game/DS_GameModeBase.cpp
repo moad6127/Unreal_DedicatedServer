@@ -84,7 +84,6 @@ void ADSGameModeBase::TrySeamlessTravel(TSoftObjectPtr<UWorld> DestinationMap)
 	}
 	else
 	{
-		//ServerTravel is not supported in the editor, so we need to use OpenLevel instead.
 		GetWorld()->ServerTravel(MapName);
 	}
 }
