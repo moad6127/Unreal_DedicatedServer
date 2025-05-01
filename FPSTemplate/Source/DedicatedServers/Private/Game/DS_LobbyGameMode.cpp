@@ -18,6 +18,7 @@ ADS_LobbyGameMode::ADS_LobbyGameMode()
 
 void ADS_LobbyGameMode::PostLogin(APlayerController* NewPlayer)
 {
+
 	Super::PostLogin(NewPlayer);
 	CheckAndStartLobbyCountdown();
 	UE_LOG(LogTemp, Warning, TEXT("ADS_LobbyGameMode::PostLogin for %s"), *NewPlayer->GetName());
@@ -30,7 +31,6 @@ void ADS_LobbyGameMode::InitSeamlessTravelPlayer(AController* NewPlayer)
 	Super::InitSeamlessTravelPlayer(NewPlayer);
 	CheckAndStartLobbyCountdown();
 	UE_LOG(LogTemp, Warning, TEXT("ADS_LobbyGameMode::InitSeamlessTravelPlayer for %s"), *NewPlayer->GetName());
-
 }
 
 void ADS_LobbyGameMode::Logout(AController* Exiting)
@@ -82,7 +82,7 @@ void ADS_LobbyGameMode::TryAcceptPlayerSession(const FString& PlayerSessionId, c
 	//
 #if WITH_GAMELIFT
 	Aws::GameLift::Server::Model::DescribePlayerSessionsRequest DescribePlayerSessionsRequest;
-	DescribePlayerSessionsRequest.SetPlayerId(TCHAR_TO_ANSI(*PlayerSessionId));
+	DescribePlayerSessionsRequest.SetPlayerSessionId(TCHAR_TO_ANSI(*PlayerSessionId));
 
 	const auto& DescribePlayerSessionsOutcome = Aws::GameLift::Server::DescribePlayerSessions(DescribePlayerSessionsRequest);
 	if (!DescribePlayerSessionsOutcome.IsSuccess())
@@ -96,22 +96,24 @@ void ADS_LobbyGameMode::TryAcceptPlayerSession(const FString& PlayerSessionId, c
 	const Aws::GameLift::Server::Model::PlayerSession* PlayerSessions = DescribePlayerSessionsResult.GetPlayerSessions(Count);
 	if (PlayerSessions == nullptr || Count == 0)
 	{
-		OutErrorMessage = TEXT("GetPlayerSession Failed.");
+		OutErrorMessage = TEXT("GetPlayerSessions failed.");
 		return;
 	}
 
-	for (int32 i = 0;i < Count;i++)
+
+	for (int32 i = 0; i < Count; i++)
 	{
 		const Aws::GameLift::Server::Model::PlayerSession& PlayerSession = PlayerSessions[i];
 		if (!Username.Equals(PlayerSession.GetPlayerId())) continue;
 		if (PlayerSession.GetStatus() != Aws::GameLift::Server::Model::PlayerSessionStatus::RESERVED)
 		{
-			OutErrorMessage = FString::Printf(TEXT("Session for %s not RESERVED; Fail PreLogin"), *Username);
+			OutErrorMessage = FString::Printf(TEXT("Session for %s not RESERVED; Fail PreLogin."), *Username);
 			return;
 		}
 
-		const auto&  AcceptPlayerSessionOutcome = Aws::GameLift::Server::AcceptPlayerSession(TCHAR_TO_ANSI(*PlayerSessionId));
-		OutErrorMessage = AcceptPlayerSessionOutcome.IsSuccess() ? "" : FString::Printf(TEXT("Failed to Accept Player session for %s"), *Username);
+		const auto& AcceptPlayerSessionOutcome = Aws::GameLift::Server::AcceptPlayerSession(TCHAR_TO_ANSI(*PlayerSessionId));
+		OutErrorMessage = AcceptPlayerSessionOutcome.IsSuccess() ? "" : FString::Printf(TEXT("Failed to accept player session for %s"), *Username);
+
 	}
 	//
 #endif
@@ -152,6 +154,7 @@ void ADS_LobbyGameMode::OnCountdownTimerFinished(ECountdownTimerType Type)
 		StopCountdownTimer(LobbyCountdownTimerHandle);
 		LobbyStatus = ELobbyStatus::SeamlessTraveling;
 		TrySeamlessTravel(DestinationMap);
+
 	}
 }
 
@@ -164,6 +167,7 @@ void ADS_LobbyGameMode::InitGameLift()
 			FServerParameters ServerParameters;
 			SetServerParameters(ServerParameters);
 			DSGameInstanceSubSystem->InitGameLift(ServerParameters);
+
 		}
 	}
 }

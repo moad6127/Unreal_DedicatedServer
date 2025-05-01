@@ -11,6 +11,7 @@ ADS_MatchGameMode::ADS_MatchGameMode()
 	PreMatchTimer.Type = ECountdownTimerType::PreMatch;
 	MatchTimer.Type = ECountdownTimerType::Match;
 	PostMatchTimer.Type = ECountdownTimerType::PostMatch;
+
 }
 
 void ADS_MatchGameMode::PostLogin(APlayerController* NewPlayer)

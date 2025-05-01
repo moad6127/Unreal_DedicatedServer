@@ -17,6 +17,8 @@ void UDS_GameInstanceSubSystem::InitGameLift(const FServerParameters& ServerPara
 		return;
 	}
 
+	bGameLiftInitialized = true;
+
 #if WITH_GAMELIFT
 	UE_LOG(LogDedicatedServers, Log, TEXT("Initializing the GameLift Server"));
 
@@ -61,7 +63,7 @@ void UDS_GameInstanceSubSystem::InitGameLift(const FServerParameters& ServerPara
 	//test CreateGameSession
 	//OK;
 #endif
-	bGameLiftInitialized = true;
+
 }
 
 void UDS_GameInstanceSubSystem::ParseCommandLinePort(int32& OutPort)

@@ -73,7 +73,6 @@ void ADSGameModeBase::UpdateCountdownTimer(const FCountdownTimerHandle& Countdow
 
 void ADSGameModeBase::OnCountdownTimerFinished(ECountdownTimerType Type)
 {
-
 }
 
 void ADSGameModeBase::TrySeamlessTravel(TSoftObjectPtr<UWorld> DestinationMap)
