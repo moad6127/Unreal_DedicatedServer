@@ -43,6 +43,8 @@ public:
 	void AddPlayerInfo(const FLobbyPlayerInfo& PlayerInfo);
 	void RemovePlayerInfo(const FString& Username);
 
+	TArray<FLobbyPlayerInfo> GetPlayers() const;
+
 protected:
 	
 
