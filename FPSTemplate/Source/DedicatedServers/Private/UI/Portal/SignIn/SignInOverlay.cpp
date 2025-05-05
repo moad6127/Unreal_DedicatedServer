@@ -82,7 +82,7 @@ void USignInOverlay::SignUpButtonClicked()
 	const FString UserName = SignUpPage->TextBox_UserName->GetText().ToString();
 	const FString Password = SignUpPage->TextBox_Password->GetText().ToString();
 	const FString Eamil = SignUpPage->TextBox_Email->GetText().ToString();
-
+	SignUpPage->Button_SignUp->SetIsEnabled(false);
 	PortalManager->SignUp(UserName, Password, Eamil);
 }
 
@@ -96,6 +96,7 @@ void USignInOverlay::ConfrimButtonClicked()
 void USignInOverlay::OnSignUpSucceeded()
 {
 	SignUpPage->ClearTextBoxes();
+	SignUpPage->Button_SignUp->SetIsEnabled(true);
 	ConfirmSignUpPage->TextBlock_Destination->SetText(FText::FromString(PortalManager->LastSignUpResponse.CodeDeliveryDetails.Destination));
 	ShowConfirmPage();
 }
