@@ -9,11 +9,16 @@
 /**
  * 
  */
+struct FDSRecordMatchStatsInput;
+
+
 UCLASS()
 class DEDICATEDSERVERS_API UGameStatsManager : public UHTTPRequestManager
 {
 	GENERATED_BODY()
-	
+public:
+
+	void RecordMatchStats(const FDSRecordMatchStatsInput& RecordMatchStatsInput);
 	
 	
 	
