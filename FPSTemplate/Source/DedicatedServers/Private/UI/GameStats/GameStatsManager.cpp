@@ -8,6 +8,7 @@
 #include "HttpModule.h"
 #include "Data/API/APIData.h"
 #include "GameplayTags/DedicatedServersTag.h"
+#include "Player/DSLocalPlayerSubssytem.h"
 
 void UGameStatsManager::RecordMatchStats(const FDSRecordMatchStatsInput& RecordMatchStatsInput)
 {
@@ -29,6 +30,8 @@ void UGameStatsManager::RecordMatchStats(const FDSRecordMatchStatsInput& RecordM
 	Request->ProcessRequest();
 }
 
+
+
 void UGameStatsManager::RecordMatchStats_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
 	if (!bWasSuccessful)
@@ -41,4 +44,33 @@ void UGameStatsManager::RecordMatchStats_Response(FHttpRequestPtr Request, FHttp
 	{
 		ContainsErrors(JsonObject);
 	}
+}
+
+void UGameStatsManager::RetrieveMatchStats()
+{
+	UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem();
+	if (!IsValid(LocalPlayerSubSystem))
+	{
+		return;
+	}
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::RetrieveMatchStats);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::RetrieveMatchStats_Response);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	TMap<FString, FString> Params = {
+		{TEXT("accessToken"), LocalPlayerSubSystem->GetAuthResult().AccessToken}
+	};
+	const FString Content = SerializeJsonContent(Params);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+
+void UGameStatsManager::RetrieveMatchStats_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
 }
