@@ -4,23 +4,22 @@
 #include "JsonObjectConverter.h"
 #include "UI/HTTP/HTTPRequestTypes.h"
 #include "Interfaces/IHttpRequest.h"
+#include "Interfaces/IHttpResponse.h"
 #include "HttpModule.h"
 #include "Data/API/APIData.h"
 #include "GameplayTags/DedicatedServersTag.h"
 
 void UGameStatsManager::RecordMatchStats(const FDSRecordMatchStatsInput& RecordMatchStatsInput)
 {
-	TSharedPtr<FJsonObject> JsonObject = MakeShared<FJsonObject>();
-	FJsonObjectConverter::UStructToJsonObject(FDSRecordMatchStatsInput::StaticStruct(), &RecordMatchStatsInput, JsonObject.ToSharedRef());
+	//TSharedPtr<FJsonObject> JsonObject = MakeShared<FJsonObject>();
+	//FJsonObjectConverter::UStructToJsonObject(FDSRecordMatchStatsInput::StaticStruct(), &RecordMatchStatsInput, JsonObject.ToSharedRef());
 
 	FString JsonString;
 	FJsonObjectConverter::UStructToJsonObjectString(FDSRecordMatchStatsInput::StaticStruct(), &RecordMatchStatsInput, JsonString);
 
-	GEngine->AddOnScreenDebugMessage(-1, 600.f, FColor::Red, JsonString);
-
 	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
-
 	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::RecordMatchStats);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::RecordMatchStats_Response);
 
 	Request->SetURL(APIUrl);
 	Request->SetVerb(TEXT("POST"));
@@ -28,4 +27,18 @@ void UGameStatsManager::RecordMatchStats(const FDSRecordMatchStatsInput& RecordM
 	Request->SetContentAsString(JsonString);
 
 	Request->ProcessRequest();
+}
+
+void UGameStatsManager::RecordMatchStats_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Failed to send RecordMatchStats request"));
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		ContainsErrors(JsonObject);
+	}
 }

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UI/HTTP/HTTPRequestManager.h"
+#include "Interfaces/IHttpRequest.h"
 #include "GameStatsManager.generated.h"
 
 /**
@@ -20,6 +21,8 @@ public:
 
 	void RecordMatchStats(const FDSRecordMatchStatsInput& RecordMatchStatsInput);
 	
-	
+private:
+	void RecordMatchStats_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+
 	
 };
