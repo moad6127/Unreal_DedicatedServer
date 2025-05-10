@@ -73,4 +73,24 @@ void UGameStatsManager::RetrieveMatchStats()
 
 void UGameStatsManager::RetrieveMatchStats_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
+	if (!bWasSuccessful)
+	{
+		OnRetrieveMatchStatsResponseReceived.Broadcast(FDSRetrieveMatchStatsResponse());
+		return;
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			OnRetrieveMatchStatsResponseReceived.Broadcast(FDSRetrieveMatchStatsResponse());
+			return;
+		}
+		FDSRetrieveMatchStatsResponse RetrieveMatchStatsResponse;
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &RetrieveMatchStatsResponse);
+		RetrieveMatchStatsResponse.Dump();
+
+		OnRetrieveMatchStatsResponseReceived.Broadcast(RetrieveMatchStatsResponse);
+	}
 }
