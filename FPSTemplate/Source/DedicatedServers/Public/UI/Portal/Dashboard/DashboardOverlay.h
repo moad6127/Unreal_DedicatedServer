@@ -14,6 +14,9 @@ class UGamePage;
 class UCareerPage;
 class ULeaderboardPage;
 class UButton;
+class UGameStatsManager;
+
+
 UCLASS()
 class DEDICATEDSERVERS_API UDashboardOverlay : public UUserWidget
 {
@@ -42,6 +45,9 @@ public:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Button_Leaderboard;
 
+	UPROPERTY(EditDefaultsOnly)
+	TSubclassOf<UGameStatsManager> GameStatsManagerClass;
+
 protected:
 	virtual void NativeConstruct() override;
 
@@ -54,4 +60,9 @@ private:
 
 	UFUNCTION()
 	void ShowLeaderboardPage();
+
+	void DisableButton(UButton* Button) const;
+
+	UPROPERTY()
+	TObjectPtr<UGameStatsManager> GameStatsManager;
 };
