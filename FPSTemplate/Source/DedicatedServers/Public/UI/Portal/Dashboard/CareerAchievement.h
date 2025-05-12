@@ -11,6 +11,7 @@
  */
 
 class UTextBlock;
+class UImage;
 UCLASS()
 class DEDICATEDSERVERS_API UCareerAchievement : public UUserWidget
 {
@@ -19,6 +20,7 @@ class DEDICATEDSERVERS_API UCareerAchievement : public UUserWidget
 public:
 
 	void SetAchievementText(const FString& AchievementName, int32 AchievementValue) const;
+	void SetAchievementIcon(UTexture2D* Icon) const;
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UTextBlock> TextBlock_AchievementName;
@@ -26,6 +28,7 @@ public:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UTextBlock> TextBlock_AchievementValue;
 
-
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UImage> Image_AchievementIcon;
 	
 };

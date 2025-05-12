@@ -23,7 +23,7 @@ class DEDICATEDSERVERS_API UCareerPage : public UUserWidget
 public:
 
 	UFUNCTION()
-	void OnRetrieveMatchStats(const FDSRetrieveMatchStatsResponse& RetrieveMatchStatsResponse);
+	virtual void OnRetrieveMatchStats(const FDSRetrieveMatchStatsResponse& RetrieveMatchStatsResponse);
 
 	UFUNCTION()
 	void SetStatusMessage(const FString& Message, bool bShouldResetWidget);
