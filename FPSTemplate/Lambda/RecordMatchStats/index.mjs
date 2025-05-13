@@ -1,0 +1,54 @@
+import { CognitoIdentityProviderClient, AdminGetUserCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+import { DynamoDBClient, GetItemCommand, PutItemCommand  } from "@aws-sdk/client-dynamodb"; // ES Modules import
+import { marshall,unmarshall } from "@aws-sdk/util-dynamodb";
+
+export const handler = async (event) => {
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+  const dynamoDBClient = new DynamoDBClient({region : process.env.REGION});
+
+  try{
+    const adminGetUserInput = {
+      Username : event.username,
+      UserPoolId:process.env.USER_POOL_ID
+    };
+    const adminGetUserCommand = new AdminGetUserCommand(adminGetUserInput);
+    const adminGetUserResponse = await cognitoIdentityProviderClient.send(adminGetUserCommand);
+
+    const sub = adminGetUserResponse.UserAttributes.find(attribute => attribute.Name === "sub").Value;
+    const email = adminGetUserResponse.UserAttributes.find(attribute => attribute.Name === "email").Value;
+
+    const getItemInput = {
+      TableName : "Players",
+      Key: marshall ({ databaseid  : sub}),
+    };
+
+    const getItemCommand = new GetItemCommand(getItemInput);
+    const dbResponse = await dynamoDBClient.send(getItemCommand);
+    let statsFromDB = unmarshall(dbResponse.Item);
+
+    const eventMatchStats = event.matchStats;
+
+    for(const key in eventMatchStats){
+      if(statsFromDB[key] !== undefined){
+        statsFromDB[key] += eventMatchStats[key];
+      } else{
+        statsFromDB[key] = eventMatchStats[key];
+      }
+    }
+
+    const putItemInput ={
+      TableName : "Players",
+      Item : marshall({...statsFromDB})
+    };
+    const putItemCommand  =new PutItemCommand(putItemInput);
+    await dynamoDBClient.send(putItemCommand);
+
+    return {
+      statusCode : 200,
+      body : `Update match stats for ${event.username}`
+    };
+  }catch(error)
+  {
+    return error;
+  }
+};
