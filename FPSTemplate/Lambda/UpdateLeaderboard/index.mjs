@@ -1,6 +1,9 @@
 import { CognitoIdentityProviderClient, AdminGetUserCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+import { DynamoDBClient, GetItemCommand, PutItemCommand, ScanCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
+import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
 
 const cognitoClient = new CognitoIdentityProviderClient({ region: process.env.REGION  });
+const dynamoDBClient = new DynamoDBClient({ region: process.env.REGION  });
 
 export const handler = async (event) => {
   
@@ -12,10 +15,17 @@ export const handler = async (event) => {
   // retrieve player data (cognito sub ids)
   const playerData = await retrievePlayerData(playerIds, userPoolId)
   // retrieve player current wins
+  const updatedPlayerData = await retrieveCurrentWins(playerData);
   
   // add winers leaderboard
-
+  await updateLeaderboard(updatedPlayerData);
   // ensure only top 20 players
+ await ensureTop20Players();
+  return {
+    statusCode: 200,
+    body: "Leaderboard updated successfully"
+  };
+
   }catch(error){
 
     return error;
@@ -30,8 +40,60 @@ async function retrievePlayerData(playerIds, userPoolId){
       UserPoolId: userPoolId,
     });
     const adminGetUserResponse = await cognitoClient.send(adminGetUserCommand);
-    const databaseid = adminGetUserResponse.UserAttributes.find(attr => attr.Name ==="sub").Value;
-    return {playerId, databaseid};
+    const databaseId = adminGetUserResponse.UserAttributes.find(attr => attr.Name ==="sub").Value;
+    return {playerId, databaseId};
   }));
+}
 
+async function retrieveCurrentWins(playerData){
+  return await Promise.all(playerData.map( async (player) => {
+    const getItemCommand = new GetItemCommand({
+      TableName: "Players",
+      Key : marshall( { databaseid : player.databaseId} ),
+    });
+    const getItemResponse = await dynamoDBClient.send(getItemCommand);
+    const playerItem = getItemResponse.Item ? unmarshall(getItemResponse.Item) : {};
+
+    let numWins = playerItem.matchWins || 0;
+    numWins += 1;
+
+    return {...player, wins : numWins || 0 };
+  }));
+}
+
+async function updateLeaderboard(playerData){
+  return await Promise.all(playerData.map(async (player) => {
+    const putItemCommand = new PutItemCommand({
+      TableName: "Leaderboard",
+      Item : marshall({
+        databaseid : player.databaseId,
+        username : player.playerId,
+        matchWins : player.wins
+      })
+    });
+    const putItemResponse = await dynamoDBClient.send(putItemCommand);
+    return putItemResponse.Item ? unmarshall(putItemResponse.Item) : {};
+  }));
+}
+
+async function ensureTop20Players(){
+  const scanCommand = new ScanCommand({
+    TableName: "Leaderboard"
+  });
+  const scanResponse = await dynamoDBClient.send(scanCommand);
+  const leaderboardItems = scanResponse.Items.map(item => unmarshall(item));
+
+  // sort player by win in descending order
+  leaderboardItems.sort((a, b) => b.matchWins - a.matchWins);
+  const top20Players = leaderboardItems.slice(0, 20);
+  const playersToRemove = leaderboardItems.slice(20);
+
+  const deletePromises = playersToRemove.map(player => {
+    const deleteItemCommand = new DeleteItemCommand({
+      TableName: "Leaderboard",
+      Key: marshall({ databaseid: player.databaseId })
+    });
+    return dynamoDBClient.send(deleteItemCommand);
+  });
+  await Promise.all(deletePromises);
 }
