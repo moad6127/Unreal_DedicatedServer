@@ -9,6 +9,7 @@
 /**
  * 
  */
+class UGameStatsManager;
 UCLASS()
 class DEDICATEDSERVERS_API ADS_MatchGameMode : public ADSGameModeBase
 {
@@ -24,12 +25,21 @@ public:
 	UPROPERTY()
 	EMatchStatus DS_MatchStatus;
 	
+	UPROPERTY(EditDefaultsOnly)
+	TSubclassOf<UGameStatsManager> GameStatManagerClass;
 
 protected:
+	virtual void BeginPlay() override;
 	virtual void OnCountdownTimerFinished(ECountdownTimerType Type) override;
 
 	void SetClientInuptEnabled(bool bEnabled);
-	void OnMatchEnded();
+	void EndMatchForPlayerStates();
+	virtual void OnMatchEnded();
+
+	void UpdateLeaderboard(const TArray<FString>& LeaderboardNames);
+
+	UFUNCTION()
+	void OnLeaderboardUpdated();
 
 	UPROPERTY(EditDefaultsOnly)
 	FCountdownTimerHandle PreMatchTimer;
@@ -44,4 +54,8 @@ protected:
 	TSoftObjectPtr<UWorld> LobbyMap;
 	
 
+private:
+
+	UPROPERTY()
+	TObjectPtr<UGameStatsManager> GameStatManager;
 };
