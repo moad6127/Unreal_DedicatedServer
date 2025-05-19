@@ -13,7 +13,7 @@
 struct FDSRecordMatchStatsInput;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRetrieveMatchStatsResponseReceived, const FDSRetrieveMatchStatsResponse&, RetrieveMatchStatsResponse);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRetrieveLeaderboard, const TArray<FDSLeaderboardItem>&, Leaderboard);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRetrieveLeaderboard, TArray<FDSLeaderboardItem>&, Leaderboard);
 
 UCLASS()
 class DEDICATEDSERVERS_API UGameStatsManager : public UHTTPRequestManager
@@ -28,6 +28,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable)
 	FAPIStatusMessage RetrieveMatchStatsStatusMessage;
+
+	UPROPERTY()
+	FAPIStatusMessage RetrieveLeaderboardStatusMessage;
 	
 	UPROPERTY(BlueprintAssignable)
 	FOnRetrieveMatchStatsResponseReceived OnRetrieveMatchStatsResponseReceived;
