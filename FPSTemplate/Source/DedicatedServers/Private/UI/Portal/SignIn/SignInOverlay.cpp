@@ -12,6 +12,7 @@
 #include "UI/Portal/SignIn/ConfirmSignUpPage.h"
 #include "UI/Portal/SignIn/SuccessConfirmedPage.h"
 #include "Components/EditableTextBox.h"
+#include "Player/DSLocalPlayerSubssytem.h"
 
 void USignInOverlay::NativeConstruct()
 {
@@ -46,11 +47,30 @@ void USignInOverlay::NativeConstruct()
 	* SuccessConfirmedPage 변수들 바인드 걸기
 	*/
 	SuccessConfirmedPage->Button_OK->OnClicked.AddDynamic(this, &USignInOverlay::ShowSignInPage);
+
+	ShowSignInPage();
+	AutoSignIn();
 }
 
 
+void USignInOverlay::AutoSignIn()
+{
+	if (UDSLocalPlayerSubssytem* DSLocalPlaySubSystem = PortalManager->GetDSLocalPlayerSubSystem(); IsValid(DSLocalPlaySubSystem))
+	{
+		const FString& Username = DSLocalPlaySubSystem->UserName;
+		const FString& Password = DSLocalPlaySubSystem->Password;
+		if (Username.IsEmpty() || Password.IsEmpty())
+		{
+			return;
+		}
+		SignInPage->Button_SignIn->SetIsEnabled(false);
+		PortalManager->SignIn(Username, Password);
+	}
+}
+
 void USignInOverlay::ShowSignInPage()
 {
+	SignInPage->Button_SignIn->SetIsEnabled(true);
 	WidgetSwitcher->SetActiveWidget(SignInPage);
 }
 
@@ -73,6 +93,11 @@ void USignInOverlay::SignInButtonClicked()
 {
 	const FString UserName = SignInPage->TextBox_UserName->GetText().ToString();
 	const FString Password = SignInPage->TextBox_Password->GetText().ToString();
+	if (UDSLocalPlayerSubssytem* DSLocalPlaySubSystem = PortalManager->GetDSLocalPlayerSubSystem(); IsValid(DSLocalPlaySubSystem))
+	{
+		DSLocalPlaySubSystem->Password = Password;
+	}
+
 
 	PortalManager->SignIn(UserName, Password);
 }

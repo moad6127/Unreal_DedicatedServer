@@ -23,8 +23,9 @@ public:
 	void UpdateToken(const FString& AccessToken, const FString& IdToken);
 	FDSAuthenticationResult GetAuthResult() const;
 
-	FString UserName;
-	FString Email;
+	FString UserName{};
+	FString Email{};
+	FString Password{};
 private:
 	UPROPERTY()
 	FDSAuthenticationResult AuthenticationResult;
