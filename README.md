@@ -6,25 +6,27 @@ AWS의 Cognito기능과 DynamoDB기능을 사용해 사용자 풀을 만들고 �
 
 AWS와 UE5를 연결하는 기능과 게임의 기능을 분리해서 다른 프로젝트에 쉽게 AWS기능을 사용할수 있도록 만들어져 있다.
 
+![ScreenShot00001](https://github.com/user-attachments/assets/2d7fb616-ef0f-4187-98cf-1df779ada75a)
+
 
 <details><summary> 구분</summary>
 <p>  
   
-  * [AWS]()
+  * [AWS](#AWS)
   
-    * [GameLift]()
+    * [GameLift](##GameLift)
     
-    * [Cognito]()
+    * [Cognito](##Cognito)
     
-    * [DynamoDB]()
+    * [DynamoDB](##DynamoDB)
 
-  * [Game]()
+  * [Game](#Game)
   
-    * [Session]()
+    * [Session](##Session)
     
-    * [Carrer]()
+    * [Carrer](##Carrer)
     
-    * [Leaderboard]()
+    * [Leaderboard](##Leaderboard)
 </p>
 </details>
 <br/> <br>
