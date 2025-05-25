@@ -14,19 +14,19 @@ AWS와 UE5를 연결하는 기능과 게임의 기능을 분리해서 다른 프
   
   * [AWS](#AWS)
   
-    * [GameLift](##GameLift)
+    * [GameLift](#GameLift)
     
-    * [Cognito](##Cognito)
+    * [Cognito](#Cognito)
     
-    * [DynamoDB](##DynamoDB)
+    * [DynamoDB](#DynamoDB)
 
   * [Game](#Game)
   
-    * [Session](##Session)
+    * [Session](#Session)
     
-    * [Carrer](##Carrer)
+    * [Carrer](#Carrer)
     
-    * [Leaderboard](##Leaderboard)
+    * [Leaderboard](#Leaderboard)
 </p>
 </details>
 <br/> <br>
