@@ -35,6 +35,163 @@ AWS와 UE5를 연결하는 기능과 게임의 기능을 분리해서 다른 프
 
 ## GameLift
 
+Unreal엔진에서 AWS의 기능을 사용해 멀티플레이를 진행하기 위해서는 GameLift플러그인을 엔진 내부에 추가한후, GameMode에서 필요한 작업들을 해야한다.        
+AWS에서는 Anywhere플릿과 EC2플릿이 2가지의 플릿이 존재하며 Anywhere플릿은 자체 인프라에서 서버를 구동할때 사용하는 플릿이고 EC2플릿은 AWS의 하드웨어들을 사용해 서버를 구동할때 사용되는 플릿이다.
+테스트 환경에서는 Anywhere플릿을 사용할수 있도록 엔진에서 필요한 코드들을 작성할 필요가 있다.
+
+
+### Anywhere플릿 구동하기
+
+먼저 AWS에서 Anywhere플릿을 생성한후 진행한다.      
+
+이후 엔진코드에서 필요한 함수와 코드들을 작성한후 패키징을 진행하도록 만든다.    
+
+<details><summary> InitGameLift</summary>
+  
+<p>
+  
+``` cpp
+void ADS_LobbyGameMode::SetServerParameters(FServerParameters& OutServerParameters)
+{
+	//AuthToken returned from the "aws gamelift get-compute-auth-token" API. Note this will expire and require a new call to the API after 15 minutes.
+	if (FParse::Value(FCommandLine::Get(), TEXT("-authtoken="), OutServerParameters.m_authToken))
+	{
+		UE_LOG(LogDedicatedServers, Log, TEXT("AUTH_TOKEN: %s"), *OutServerParameters.m_authToken)
+	}
+
+	//The Host/compute-name of the Amazon GameLift Servers Anywhere instance.
+	if (FParse::Value(FCommandLine::Get(), TEXT("-hostid="), OutServerParameters.m_hostId))
+	{
+		UE_LOG(LogDedicatedServers, Log, TEXT("HOST_ID: %s"), *OutServerParameters.m_hostId)
+	}
+
+	//The Anywhere Fleet ID.
+	if (FParse::Value(FCommandLine::Get(), TEXT("-fleetid="), OutServerParameters.m_fleetId))
+	{
+		UE_LOG(LogDedicatedServers, Log, TEXT("FLEET_ID: %s"), *OutServerParameters.m_fleetId)
+	}
+
+	//The WebSocket URL (GameLiftServiceSdkEndpoint).
+	if (FParse::Value(FCommandLine::Get(), TEXT("-websocketurl="), OutServerParameters.m_webSocketUrl))
+	{
+		UE_LOG(LogDedicatedServers, Log, TEXT("WEBSOCKET_URL: %s"), *OutServerParameters.m_webSocketUrl)
+	}
+
+	//The PID of the running process
+	OutServerParameters.m_processId = FString::Printf(TEXT("%d"), GetCurrentProcessId());
+	UE_LOG(LogDedicatedServers, Log, TEXT("PID: %s"), *OutServerParameters.m_processId);
+}
+
+void UDS_GameInstanceSubSystem::InitGameLift(const FServerParameters& ServerParams)
+{
+	if (bGameLiftInitialized)
+	{
+		return;
+	}
+
+	bGameLiftInitialized = true;
+
+#if WITH_GAMELIFT
+	UE_LOG(LogDedicatedServers, Log, TEXT("Initializing the GameLift Server"));
+
+	FGameLiftServerSDKModule* GameLiftSdkModule = &FModuleManager::LoadModuleChecked<FGameLiftServerSDKModule>(FName("GameLiftServerSDK"));
+	GameLiftSdkModule->InitSDK(ServerParams);
+	auto OnGameSession = [=](Aws::GameLift::Server::Model::GameSession gameSession)
+		{
+			FString GameSessionId = FString(gameSession.GetGameSessionId());
+			UE_LOG(LogDedicatedServers, Log, TEXT("GameSession Initializing: %s"), *GameSessionId);
+			GameLiftSdkModule->ActivateGameSession();
+		};
+
+	ProcessParameters.OnStartGameSession.BindLambda(OnGameSession);
+
+	auto OnProcessTerminate = [=]()
+		{
+			UE_LOG(LogDedicatedServers, Log, TEXT("Game Server process is terminating"));
+			GameLiftSdkModule->ProcessEnding();
+		};
+
+	ProcessParameters.OnTerminate.BindLambda(OnProcessTerminate);
+
+	auto OnHealthCheckLamda = []()
+		{
+			UE_LOG(LogDedicatedServers, Log, TEXT("Performing Health Check"));
+			return true;
+		};
+
+	ProcessParameters.OnHealthCheck.BindLambda(OnHealthCheckLamda);
+
+	int32 Port = FURL::UrlConfig.DefaultPort;
+	ParseCommandLinePort(Port);
+
+	ProcessParameters.port = Port;
+	TArray<FString> LogFiles;
+	LogFiles.Add(TEXT("FPSTemplate/Saved/Logs/FPSTemplate.log"));
+	ProcessParameters.logParameters = LogFiles;
+
+	UE_LOG(LogDedicatedServers, Log, TEXT("Calling Process Ready"));
+	GameLiftSdkModule->ProcessReady(ProcessParameters);
+
+#endif
+
+
+```
+
+</p>
+
+</details>
+
+패키징이 진행된후 CMD명령어를 통해 AWS Anywhere플릿에서 필요한 정보들을 입력후 사용하도록 만든다.     
+컴퓨팅 등록을 한후 인증 토큰을 얻은뒤 서버를 구동시키는 방법으로 Anywhere플릿에서 서버를 구동할수 있게 된다.      
+
+컴퓨팅 등록하기       
+```
+aws gamelift register-compute \     
+    --compute-name HardwareAnywhere \      
+    --fleet-id arn:aws:gamelift:us-east-1:111122223333:fleet/fleet-2222bbbb-33cc-44dd-55ee-6666ffff77aa \       
+    --ip-address 10.1.2.3 \      
+    --location custom-location-1
+```
+
+인증토큰 요청하기      
+```
+aws gamelift get-compute-auth-token \     
+    --fleet-id arn:aws:gamelift:us-east-1:111122223333:fleet/fleet-2222bbbb-33cc-44dd-55ee-6666ffff77aa \     
+    --compute-name HardwareAnywhere
+```    
+
+이후에 SetServerParameters함수에서 필요한 정보들을 알수있게 명령어로 알려준후 Server가 구동된다.       
+
+```
+<Server파일 위치> -log ^   
+-authtoken=<토큰> ^  
+-hostid=<호스트> ^   
+-fleetid=<플릿 아이디> ^   
+-websocketurl=<GameLiftServerSkdEndpoint > ^   
+-port=<포트번호>   
+```
+
+이러한 명령어를 통해 Anywhere플릿을 사용해 서버를 구동시킬수 있게 된다.
+
+### EC2플릿으로 구동하기
+
+EC2는 AWS에서 자체적인 하드웨어를 제공해 Server를 구동할수 있도록 만들어져 있다.       
+EC2를 사용하기 위해서는 서버 파일을 AWS에 빌드를 한후 플릿을 생성해 AWS의 하드웨어를 사용해 서버를 구동시키는 방법이다.
+
+CMD명령어로 AWS로 빌드파일을 보낼수 있다.        
+```
+aws gamelift upload-build ^
+--name <name> ^
+--operating-system <name>
+--server-sdk-version <"version">
+--build-root <Path>
+--build-version <version>
+--region <name>
+```
+
+이후 빌드가 완성되면 AWS에서 확인할수 있으며 업로드된 빌드를 바탕으로 EC2플릿을 만들어서 사용할수 있다.         
+
+
 ## Cognito
 
 ## DynamoDB
