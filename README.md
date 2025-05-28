@@ -12,21 +12,17 @@ AWS와 UE5를 연결하는 기능과 게임의 기능을 분리해서 다른 프
 <details><summary> 구분</summary>
 <p>  
   
-  * [AWS](#AWS)
-  
-    * [GameLift](#GameLift)
-    
-    * [Cognito](#Cognito)
-    
-    * [DynamoDB](#DynamoDB)
+ * [GameLift](#GameLift)
+   
+ * [Session](#Session)
 
-  * [Game](#Game)
-  
-    * [Session](#Session)
-    
-    * [Carrer](#Carrer)
-    
-    * [Leaderboard](#Leaderboard)
+ * [Cognito](#Cognito)
+
+ * [DynamoDB](#DynamoDB)
+
+ * [Carrer](#Carrer)
+
+ * [Leaderboard](#Leaderboard)
 </p>
 </details>
 <br/> <br>
@@ -189,16 +185,61 @@ aws gamelift upload-build ^
 --region <name>
 ```
 
-이후 빌드가 완성되면 AWS에서 확인할수 있으며 업로드된 빌드를 바탕으로 EC2플릿을 만들어서 사용할수 있다.         
+이후 빌드가 완성되면 AWS에서 확인할수 있으며 업로드된 빌드를 바탕으로 EC2플릿을 만들어서 사용할수 있다.    
+
+
+## Session
+
+AWS의 플릿을 사용해 서버를 구동하게되면 게임 세션을 만들어 멀티플레이환경의 게임을 작동시킬수 있게 된다.        
+이때 게임 세션을 만들수 있도록 AWS와 언리얼 엔진의 코드와 트리거 될수 있도록 하는게 HTTPRequest 이다.              
+먼저 언리얼 엔진을 통해 만들어진 UI등으로 게임 세션을 만들려는 요청이 들어오게 되면 HTTPRequest를 AWS로 보내 해당 작업이 진행된후 다시 Reponse를 받아 필요한 정보들을 받아 완료를 할수 있게 만든다.              
+이때 정보를 JSON형태로 주고 받으며 AWS에서 해당 요청을 받고 처리할수 있도록 만들어진 기능이 바로 Lambda이다.                
+
+![ScreenShot00005](https://github.com/user-attachments/assets/0271a377-9b13-4894-bc33-454fc569b83b)
+> 해당 위젯은 Join버튼을 누르면 게임세션을 찾거나 게임세션이 없을경우 게임세션을 만들어서 접속할수 있도록 만드는 위젯이다.
+
+
+``` C++
+void UGameSessionsManager::JoinGameSession()
+{
+	BroadcastJoinGameSessionMessage.Broadcast(TEXT("Searching for Game Sessions..."), false);
+
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameSessionsManager::FindOrCrateGameSession_Response);
+
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameSessionsAPI::FindOrCreateGameSession);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem();
+	if (IsValid(LocalPlayerSubSystem))
+	{
+		Request->SetHeader(TEXT("Authorization"),LocalPlayerSubSystem->GetAuthResult().AccessToken);
+	}
+
+	Request->ProcessRequest();
+}
+```
+
+Join버튼을 클릭하게되면 해당 함수가 실행되며 언리얼 엔진의 코드를 통해 HTTP가 요청되 AWS의 Lambda함수가 작동하게 된다.
+
+
 
 
 ## Cognito
 
+AWS에서는 게임에서 사용할수 있는 사용자들의 계정을 만들고 관리할수 있는 기능인 Cognito 기능이 존재해 해당 기능을 사용해서 게임에서 게임 계정을 만들고 AWS에서 관리하도록 만들수 있다.
+
+
+
+
+
+
 ## DynamoDB
-
-# Game
-
-## Session
 
 ## Carrer
 
