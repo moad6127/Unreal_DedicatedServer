@@ -228,6 +228,119 @@ void UGameSessionsManager::JoinGameSession()
 Join버튼을 클릭하게되면 해당 함수가 실행되며 언리얼 엔진의 코드를 통해 HTTP가 요청되 AWS의 Lambda함수가 작동하게 된다.
 
 
+```mjs
+import { GameLiftClient, ListFleetsCommand, DescribeFleetAttributesCommand, DescribeGameSessionsCommand, CreateGameSessionCommand    } from "@aws-sdk/client-gamelift";
+
+export const handler = async (event) => {
+
+  const gameLiftClient = new GameLiftClient( {region : process.env.REGION} );
+
+  try{
+    
+  const listFleetsInput = {
+    Limit: 10
+  };
+    const listFleetsCommand = new ListFleetsCommand(listFleetsInput);
+    const listFleetsResponse = await gameLiftClient.send(listFleetsCommand);
+    const fleetIds = listFleetsResponse.FleetIds;
+
+    const describeFleetAttributesInput = { // DescribeFleetAttributesInput
+      FleetIds: fleetIds,
+      Limit: 10
+    };
+
+    const describeFleetAttributesCommand = new DescribeFleetAttributesCommand(describeFleetAttributesInput);
+    const describeFleetAttributesResponse = await gameLiftClient.send(describeFleetAttributesCommand);
+
+    const fleetAttributes = describeFleetAttributesResponse.FleetAttributes;
+    
+    let fleetId;
+    for(const fleetAttribute of fleetAttributes){
+      if(fleetAttribute.Status === "ACTIVE"){
+        fleetId = fleetAttribute.FleetId;
+        break;
+      }
+    }
+
+    const describeGameSessionsInput = {
+      FleetId: fleetId,
+      Limit: 10,
+      StatusFilter: "ACTIVE",
+    };
+
+    const describeGameSessionsCommand = new DescribeGameSessionsCommand(describeGameSessionsInput);
+    const describeGameSessionsResponse = await gameLiftClient.send(describeGameSessionsCommand);
+
+    const gameSessions = describeGameSessionsResponse.GameSessions
+    let gameSession;
+    for(const session of gameSessions){
+      if(session.CurrentPlayerSessionCount < session.MaximumPlayerSessionCount && session.PlayerSessionCreationPolicy === "ACCEPT_ALL")
+      {
+        gameSession = session;
+        break;
+      }
+    }
+    if(gameSession){
+      //found and active game session with room fo more players
+    }
+    else{
+      //no game session found create one.
+      const createGameSessionInput = {
+          GameProperties: [ 
+          { 
+            Key: "difficulty",
+            Value: "novice", 
+          },
+        ],
+        FleetId: fleetId,
+        MaximumPlayerSessionCount: 20,
+        /*Location: "custom-home-desktop"*/
+      };
+      const createGameSessionCommand = new CreateGameSessionCommand(createGameSessionInput);
+      const createGameSessionResponse = await gameLiftClient.send(createGameSessionCommand);
+      gameSession = createGameSessionResponse.GameSession;
+    }
+
+    return gameSession;
+
+
+  }catch(error){
+    return error;
+  }
+};
+
+```
+
+해당 AWS의 Lambda를 통해 GameSession을 찾거나 새롭게 만들어서 언리얼 엔진의 C++의 Response 함수로 다시 들어오게 된다.
+
+```C++
+void UGameSessionsManager::FindOrCrateGameSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+		}
+
+		FDSGameSession GameSession;
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &GameSession);
+
+		const FString GameSessionId = GameSession.GameSessionId;
+		const FString GameSessionStatus = GameSession.Status;
+		HandleGameSessionStatus(GameSessionStatus, GameSessionId);
+
+	}
+}
+```
+
 
 
 ## Cognito
