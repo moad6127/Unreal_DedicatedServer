@@ -76,43 +76,6 @@ FString UGameSessionsManager::GetUniquePlayerId() const
 	return FString();
 }
 
-void UGameSessionsManager::CreatePlayerSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
-{
-	if (!bWasSuccessful)
-	{
-		BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
-	}
-
-	TSharedPtr<FJsonObject> JsonObject;
-	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
-	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
-	{
-		if (ContainsErrors(JsonObject))
-		{
-			BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
-		}
-
-		FDSPlayerSession PlayerSesssion;
-		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &PlayerSesssion);
-		PlayerSesssion.Dump();
-
-		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
-		if (IsValid(LocalPlayerController))
-		{
-			FInputModeGameOnly InputMode;
-			LocalPlayerController->SetInputMode(InputMode);
-			LocalPlayerController->SetShowMouseCursor(false);
-		}
-
-		const FString Options = "?PlayerSessionId=" + PlayerSesssion.PlayerSessionId + "?Username=" + PlayerSesssion.PlayerId;
-
-		const FString IPAndPort = PlayerSesssion.IpAddress + TEXT(":") + FString::FromInt(PlayerSesssion.Port);
-		const FName Address(*IPAndPort);
-		UGameplayStatics::OpenLevel(this, Address, true, Options);
-	}
-}
-
-
 
 void UGameSessionsManager::HandleGameSessionStatus(const FString& Status, const FString& SessionId)
 {
@@ -164,3 +127,40 @@ void UGameSessionsManager::TryCreatePlayerSession(const FString& PlayerId, const
 	Request->SetContentAsString(Content);
 	Request->ProcessRequest();
 }
+
+void UGameSessionsManager::CreatePlayerSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+		}
+
+		FDSPlayerSession PlayerSesssion;
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &PlayerSesssion);
+		PlayerSesssion.Dump();
+
+		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+		if (IsValid(LocalPlayerController))
+		{
+			FInputModeGameOnly InputMode;
+			LocalPlayerController->SetInputMode(InputMode);
+			LocalPlayerController->SetShowMouseCursor(false);
+		}
+
+		const FString Options = "?PlayerSessionId=" + PlayerSesssion.PlayerSessionId + "?Username=" + PlayerSesssion.PlayerId;
+
+		const FString IPAndPort = PlayerSesssion.IpAddress + TEXT(":") + FString::FromInt(PlayerSesssion.Port);
+		const FName Address(*IPAndPort);
+		UGameplayStatics::OpenLevel(this, Address, true, Options);
+	}
+}
+
