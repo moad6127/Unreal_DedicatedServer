@@ -341,6 +341,197 @@ void UGameSessionsManager::FindOrCrateGameSession_Response(FHttpRequestPtr Reque
 }
 ```
 
+Response함수를 통해서 받은 데이터들은 Lambda에서는 Json형태로 보내지만 Unreal엔진에서 Json형태로 사용하기 위해서는 Converter를 사용해 구조체 형태로 변형해 Response를 통해 얻은 정보를 저장하게 된다.
+
+``` C++
+void UGameSessionsManager::HandleGameSessionStatus(const FString& Status, const FString& SessionId)
+{
+	if (Status.Equals(TEXT("ACTIVE")))
+	{
+		BroadcastJoinGameSessionMessage.Broadcast(TEXT("Found active Game Session. Creating a Player Session..."), false);
+		
+		if (UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem(); IsValid(LocalPlayerSubSystem))
+		{
+			TryCreatePlayerSession(LocalPlayerSubSystem->UserName, SessionId);
+		}	
+	}
+	else if (Status.Equals(TEXT("ACTIVATING"))) // ACTIVATING 상태이면 잠시후 Join함수를 다시 실행하도록 만들기
+	{
+		FTimerDelegate CreateTimerDelegate;
+		CreateTimerDelegate.BindUObject(this, &UGameSessionsManager::JoinGameSession);
+		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+		if (IsValid(LocalPlayerController))
+		{
+			LocalPlayerController->GetWorldTimerManager().SetTimer(CreateSessionTimer, CreateTimerDelegate, 0.5f, false);
+		}
+	}
+	else
+	{
+		BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+
+}
+
+```
+이후 받은 Session정보들을 확인한후 ACTIVE상태일경우 PlyerSession을 생성하게 되고 ACTIVE상태가 아닐경우 타이머를 사용해 일정시간이 지난후 Join함수를 다시 호출하도록 만든다.
+
+``` C++
+void UGameSessionsManager::TryCreatePlayerSession(const FString& PlayerId, const FString& GameSessionId)
+{
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameSessionsManager::CreatePlayerSession_Response);
+
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameSessionsAPI::CreatePlayerSession);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	TMap<FString, FString> ContentParams = {
+		{TEXT("playerId"),PlayerId},
+		{TEXT("gameSessionId"),GameSessionId}
+	};
+
+	const FString Content = SerializeJsonContent(ContentParams);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+
+```
+PlayerSession을 생성하기 위해 다시한번 HTTP요청을 AWS로 보내게 되고 이때 필요한 정보들을 Json형태로 만든후 FJsonSerializer를 통해 AWS의 Lambda의 Event로 보내게 된다.
+
+```mjs
+// AWS 의 CreatePlayerSession Lambda함수
+
+import { GameLiftClient, CreatePlayerSessionCommand } from "@aws-sdk/client-gamelift"; // ES Modules import
+
+export const handler = async (event) => {
+
+
+  try{
+    const gameLiftClient = new GameLiftClient( {region : process.env.REGION } );
+    const createPlayerSessionInput = { 
+      GameSessionId: event.gameSessionId, 
+      PlayerId: event.playerId,
+      /*Location: "custom-home-desktop"*/ //remove this for EC2 fleets
+    };
+
+    const createPlayerSessionCommand = new CreatePlayerSessionCommand(createPlayerSessionInput);
+    const createPlayerSessionresponse = await gameLiftClient.send(createPlayerSessionCommand);
+
+    return createPlayerSessionresponse.PlayerSession;
+
+  }catch(error){
+    return error;
+  }
+};
+```
+AWS의 Lambda에서는 Unreal에서 받은 정보들을 사용해 PlayerSession을 만든후 만들어진 PlayerSession의 정보들을 다시 Unreal로 보내게 된다.
+
+```C++
+void UGameSessionsManager::CreatePlayerSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+		}
+
+		FDSPlayerSession PlayerSesssion;
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &PlayerSesssion);
+		PlayerSesssion.Dump();
+
+		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+		if (IsValid(LocalPlayerController))
+		{
+			FInputModeGameOnly InputMode;
+			LocalPlayerController->SetInputMode(InputMode);
+			LocalPlayerController->SetShowMouseCursor(false);
+		}
+
+		const FString Options = "?PlayerSessionId=" + PlayerSesssion.PlayerSessionId + "?Username=" + PlayerSesssion.PlayerId;
+
+		const FString IPAndPort = PlayerSesssion.IpAddress + TEXT(":") + FString::FromInt(PlayerSesssion.Port);
+		const FName Address(*IPAndPort);
+		UGameplayStatics::OpenLevel(this, Address, true, Options);
+	}
+}
+```
+Unreal에서 AWS의 Lambda의 응답을 받게되면 Lambda를 통해 들어온 정보들을 다시 구조체의 형태로 변경한후 Game에 들어갈 준비를 한후 OpenLevel을 사용해 Map을 이동하게 된다.
+
+```C++
+void ADS_LobbyGameMode::PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
+{
+	Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
+
+	const FString PlayerSessionId = UGameplayStatics::ParseOption(Options, TEXT("PlayerSessionId"));
+	const FString Username = UGameplayStatics::ParseOption(Options, TEXT("Username"));
+
+	TryAcceptPlayerSession(PlayerSessionId, Username, ErrorMessage);
+
+}
+
+void ADS_LobbyGameMode::TryAcceptPlayerSession(const FString& PlayerSessionId, const FString& Username, FString& OutErrorMessage)
+{
+	if (PlayerSessionId.IsEmpty() || Username.IsEmpty())
+	{
+		OutErrorMessage = TEXT("PlayerSessionId and/or Username is empty");
+		return;
+	}
+	//
+#if WITH_GAMELIFT
+	Aws::GameLift::Server::Model::DescribePlayerSessionsRequest DescribePlayerSessionsRequest;
+	DescribePlayerSessionsRequest.SetPlayerSessionId(TCHAR_TO_ANSI(*PlayerSessionId));
+
+	const auto& DescribePlayerSessionsOutcome = Aws::GameLift::Server::DescribePlayerSessions(DescribePlayerSessionsRequest);
+	if (!DescribePlayerSessionsOutcome.IsSuccess())
+	{
+		OutErrorMessage = TEXT("DescribePlayerSessions Failed.");
+		return;
+	}
+
+	const auto& DescribePlayerSessionsResult = DescribePlayerSessionsOutcome.GetResult();
+	int32 Count = 0;
+	const Aws::GameLift::Server::Model::PlayerSession* PlayerSessions = DescribePlayerSessionsResult.GetPlayerSessions(Count);
+	if (PlayerSessions == nullptr || Count == 0)
+	{
+		OutErrorMessage = TEXT("GetPlayerSessions failed.");
+		return;
+	}
+
+
+	for (int32 i = 0; i < Count; i++)
+	{
+		const Aws::GameLift::Server::Model::PlayerSession& PlayerSession = PlayerSessions[i];
+		if (!Username.Equals(PlayerSession.GetPlayerId())) continue;
+		if (PlayerSession.GetStatus() != Aws::GameLift::Server::Model::PlayerSessionStatus::RESERVED)
+		{
+			OutErrorMessage = FString::Printf(TEXT("Session for %s not RESERVED; Fail PreLogin."), *Username);
+			return;
+		}
+
+		const auto& AcceptPlayerSessionOutcome = Aws::GameLift::Server::AcceptPlayerSession(TCHAR_TO_ANSI(*PlayerSessionId));
+		OutErrorMessage = AcceptPlayerSessionOutcome.IsSuccess() ? "" : FString::Printf(TEXT("Failed to accept player session for %s"), *Username);
+
+	}
+	//
+#endif
+}
+```
+이후 Player는 Lobby로 보내질 준비를 하게되고 Error가 발생하지 않게되면 PlayerSession을 바탕으로 Player를 Lobby로 받아들이게 된다.
+일정한 수의 Player가 Lobby에 들어오면 Countdown을 시작해 GameMap으로 이동을 시작해 Game을 Play할수 있게 된다.
+
+
 
 
 ## Cognito
