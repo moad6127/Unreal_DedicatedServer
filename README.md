@@ -311,7 +311,7 @@ export const handler = async (event) => {
 
 ```
 
-해당 AWS의 Lambda를 통해 GameSession을 찾거나 새롭게 만들어서 언리얼 엔진의 C++의 Response 함수로 다시 들어오게 된다.
+해당 AWS의 Lambda를 서버가 존재할경우 ACTIVE 되어있는 GameSession을 찾거나 새롭게 만들어서 언리얼 엔진의 C++의 Response 함수로 다시 들어오게 된다.
 
 ```C++
 void UGameSessionsManager::FindOrCrateGameSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
@@ -467,6 +467,10 @@ void UGameSessionsManager::CreatePlayerSession_Response(FHttpRequestPtr Request,
 	}
 }
 ```
+
+![Lobby](https://github.com/user-attachments/assets/6e224308-2539-4c02-840f-6577dda3d7af)
+> LobbyMap으로 이동한 모습이다. Lobby로 들어온 Player들을 체크하고 일정한 수가 넘어가면 Countdown을 시작하도록 만든다.
+
 Unreal에서 AWS의 Lambda의 응답을 받게되면 Lambda를 통해 들어온 정보들을 다시 구조체의 형태로 변경한후 Game에 들어갈 준비를 한후 OpenLevel을 사용해 Map을 이동하게 된다.
 
 ```C++
