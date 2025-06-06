@@ -542,8 +542,78 @@ void ADS_LobbyGameMode::TryAcceptPlayerSession(const FString& PlayerSessionId, c
 
 AWS에서는 게임에서 사용할수 있는 사용자들의 계정을 만들고 관리할수 있는 기능인 Cognito 기능이 존재해 해당 기능을 사용해서 게임에서 게임 계정을 만들고 AWS에서 관리하도록 만들수 있다.
 
+### SignIn
 
+![ScreenShot00007](https://github.com/user-attachments/assets/49cc867c-a20b-4339-850c-b321073c753c)
+> 만약 AWS의 Cognito계정이 존재할경우 아이디와 비밀번호를 입력해 접속할수 있도록 만들었다.
 
+```C++
+void UPortalManager::SignIn(const FString& UserName, const FString& Password)
+{
+	SignInStatusMessageDelegate.Broadcast(TEXT("SignIn in..."), false);
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &UPortalManager::SignIn_Response);
+
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::Portal::SignIn);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	LastUserName = UserName;
+	TMap<FString, FString> ContentParams = {
+		{TEXT("username"),UserName},
+		{TEXT("password"),Password}
+	};
+	const FString Content = SerializeJsonContent(ContentParams);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+
+void UPortalManager::SignIn_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		SignInStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			SignInStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+			return;
+		}
+		FDSInitiateAuthResponse InitiateAuthResponse;
+
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &InitiateAuthResponse);
+		InitiateAuthResponse.Dump();
+
+		UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem();
+		if (IsValid(LocalPlayerSubSystem))
+		{
+			LocalPlayerSubSystem->InitializeTokens(InitiateAuthResponse.AuthenticationResult,this);
+			LocalPlayerSubSystem->UserName = LastUserName;
+			LocalPlayerSubSystem->Email = InitiateAuthResponse.email;
+		}
+
+		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+		if (IsValid(LocalPlayerController))
+		{
+			if (IHUDManagement* HUDManagement = Cast<IHUDManagement>(LocalPlayerController->GetHUD()))
+			{
+				HUDManagement->OnSignIn();
+			}
+		}
+	}
+}
+```
+
+Http요청으로 AWS로 SignIn에 필요한 정보들을 보낸후 응답받도록 만들어진 함수들이다.
+응답에 성공하게 되면 PlayerSubsystem에 사용자에 필요한 토큰, 사용자 이메일등을 따로 저장해 사용할수 있도록 한다.
 
 
 
