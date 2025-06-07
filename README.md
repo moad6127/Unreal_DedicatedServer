@@ -571,7 +571,88 @@ void UPortalManager::SignIn(const FString& UserName, const FString& Password)
 	Request->SetContentAsString(Content);
 	Request->ProcessRequest();
 }
+```
 
+Http요청으로 AWS로 SignIn에 필요한 정보들을 보낸후 응답받도록 만들어진 함수들이다.
+응답에 성공하게 되면 PlayerSubsystem에 사용자에 필요한 토큰, 사용자 이메일등을 따로 저장해 사용할수 있도록 한다.
+
+```mjs
+import { CognitoIdentityProviderClient, InitiateAuthCommand, GetUserCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+
+export const handler = async (event) => {
+
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+
+  const { username, password,refreshToken } = event;
+  if(refreshToken){
+    const refreshTokensInput = {
+      AuthFlow: "REFRESH_TOKEN_AUTH",
+      ClientId: process.env.CLIENT_ID,
+      AuthParameters: {
+        REFRESH_TOKEN: refreshToken
+      }
+    };
+    const initiateAuthCommand = new InitiateAuthCommand(refreshTokensInput);
+    try{
+      const initiateAuthResponse = await cognitoIdentityProviderClient.send(initiateAuthCommand);
+      return initiateAuthResponse;
+    }
+    catch(error)
+    {
+      return error;
+    }
+    
+  }else{
+    const initateAutInput = {
+      AuthFlow: "USER_PASSWORD_AUTH",
+      ClientId: process.env.CLIENT_ID,
+      AuthParameters: {
+        USERNAME: username,
+        PASSWORD: password
+      }
+    };
+  
+    const initiateAuthCommand = new InitiateAuthCommand(initateAutInput);
+  
+    try{
+      const initiateAuthResponse = await cognitoIdentityProviderClient.send(initiateAuthCommand);
+
+      const getUserInput = {
+        AccessToken: initiateAuthResponse.AuthenticationResult.AccessToken
+      };
+      const getUserCommand = new GetUserCommand(getUserInput);
+      const getUserResponse = await cognitoIdentityProviderClient.send(getUserCommand);
+
+      let emailAtrribute;
+      for(const attribute of getUserResponse.UserAttributes){
+        if(attribute.Name === "email"){
+          emailAtrribute = attribute.Value;
+          break;
+        }
+      }
+      const response = {
+        ...initiateAuthResponse,
+        email: emailAtrribute
+      };
+
+      return response;
+    }
+    catch(error)
+    {
+      return error;
+    }
+  }
+
+
+};
+
+```
+Unreal 엔진의 SignIn함수를 통해서 보내진 ID와 Password를 통해서 Cognito계정에 접속을 하게된후 AccessToken과 Player의 Email을 다시 Response함수로 보내게 주는 Lambda이다.
+이때 ID와 Password대신 refreshToken이 들어온 경우 일정 시간이 지나 Token을 다시 받도록 하는 함수가 작동된것으로, 이 함수는 Timer를 사용해 일정시간마다 refreshToken을 보내 Token을 다시 받는다.
+
+
+
+```C++
 void UPortalManager::SignIn_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
 	if (!bWasSuccessful)
@@ -612,9 +693,144 @@ void UPortalManager::SignIn_Response(FHttpRequestPtr Request, FHttpResponsePtr R
 }
 ```
 
-Http요청으로 AWS로 SignIn에 필요한 정보들을 보낸후 응답받도록 만들어진 함수들이다.
-응답에 성공하게 되면 PlayerSubsystem에 사용자에 필요한 토큰, 사용자 이메일등을 따로 저장해 사용할수 있도록 한다.
+### SignUp
 
+![ScreenShot00011](https://github.com/user-attachments/assets/d303865d-a2fe-4d4c-ace1-46a7ad4dfe8f)
+
+Cognito계정을 Unreal엔진을 통해서 만들수 있도록 하는 것으로 사용할 Id, Password,Email을 Unreal의 Http로 AWS Cognito로 보내 사용자 계정을 만들도록 하는 방법이다.
+
+```C++
+void UPortalManager::SignUp(const FString& UserName, const FString& Password, const FString& Email)
+{
+	SignUpStatusMessageDelegate.Broadcast(TEXT("Creating a new account."), false);
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &UPortalManager::SignUp_Response);
+
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::Portal::SignUp);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	LastUserName = UserName;
+	TMap<FString, FString> ContentParams = {
+		{TEXT("username"),UserName},
+		{TEXT("password"),Password},
+		{TEXT("email"),Email}
+	};
+	const FString Content = SerializeJsonContent(ContentParams);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+```
+각각의 텍스트에 필요한 정보들을 넣어서 버튼을 누르게 되면 SignUp함수가 호출되며 각각의 정보들을 HTTP요청으로 보내게 된다.
+
+```mjs
+import { CognitoIdentityProviderClient, SignUpCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+
+export const handler = async (event) => {
+  
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+
+  const clientId = process.env.CLIENT_ID;
+
+  const{ username,password,email }= event;
+
+  const signUpInput = {
+    ClientId: clientId,
+    Username: username,
+    Password: password,
+    UserAttributes: [
+      {
+        Name: "email",
+        Value: email
+      }
+    ]
+  };
+
+  try{
+    const signUpCommand = new SignUpCommand(signUpInput);
+    const signUpResponse = await cognitoIdentityProviderClient.send(signUpCommand);
+  
+    return signUpResponse;
+  }catch(error)
+  {
+    return error;
+  }
+
+};
+```
+이러한 Lambda함수를 통해 새롭게 계정이 만들어 지게 된다.     
+
+```mjs
+import { CognitoIdentityProviderClient, ListUsersCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+
+export const handler = async (event) => {
+  const email = event.request.userAttributes.email;
+
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION });
+  const listUsersInput = {
+    UserPoolId : event.userPoolId,
+    Filter : `email = "${email}"`
+  }
+  const listUsersCommand = new ListUsersCommand(listUsersInput);
+
+  try{
+    const listUsersResponse = await cognitoIdentityProviderClient.send(listUsersCommand);
+    if(listUsersResponse.Users.length > 0)
+    {
+      throw new Error("A user with this email aleady exists.")
+    }
+    return event;
+  }catch(error){
+    console.error(error);
+    throw new Error(error.message);
+  }
+};
+
+```
+이때 사용자가 전해준 Email정보가 이미 존재할경우를 대비해 Cognito의 확장기능인 사전 가입 Lambda트리거를 사용해 SignUp이 되기전에 해당 Lambda를 실행해 이미 Email이 존재하는지 확인한다음 문제가 없을경우 다음단계로 넘어가게 된다.
+
+```C++
+void UPortalManager::SignUp_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		SignUpStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			SignUpStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+			return;
+		}
+
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &LastSignUpResponse);
+		OnSignUpSucceeded.Broadcast();
+	}
+
+}
+```
+계정 생성시 문제가 없을경우 HTTP의 응답함수에서 성공하게 되며 델리게이트를 통해 성공을 Broadcast하게 된다.
+
+```C++
+void USignInOverlay::OnSignUpSucceeded()
+{
+	SignUpPage->ClearTextBoxes();
+	SignUpPage->Button_SignUp->SetIsEnabled(true);
+	ConfirmSignUpPage->TextBlock_Destination->SetText(FText::FromString(PortalManager->LastSignUpResponse.CodeDeliveryDetails.Destination));
+	ShowConfirmPage();
+}
+```
+델리게이트가 broadcast됬을때 반응되는 함수로 각각의 TextBlock들의 내용을 지운후 Confirm Page로 넘어가게 된다.
+
+
+### Confirm
 
 
 ## DynamoDB
