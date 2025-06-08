@@ -832,6 +832,103 @@ void USignInOverlay::OnSignUpSucceeded()
 
 ### Confirm
 
+![ScreenShot00016](https://github.com/user-attachments/assets/64568038-a7f7-41f1-83d8-0088eee30ca9)
+
+SignUp버튼을 누르게 되면 SignUp에서 사용된 Email주소로 사용자의 확인 코드가 전해지게 된다.
+AWS에서는 UserPool을 만들때 확인할수 있는것들을 선택할수 있는데, 이때 Email로 선택할시 Email로 확인코드가 담긴 메일이 보내지고 이러한 확인코드를 다시 Unreal엔진에서 받아 HTTP요청을 보내 확인할수 있도록 한다.
+
+```C++
+void UPortalManager::Confirm(const FString& ConfirmationCode)
+{
+	check(APIData);
+	ConfirmStatusMessageDelegate.Broadcast(TEXT("Checking verification code..."), false);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &UPortalManager::Confirm_Response);
+
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::Portal::ConfirmSignUp);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("PUT"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	TMap<FString, FString> ContentParams = {
+		{TEXT("username"),LastUserName},
+		{TEXT("confirmationCode"),ConfirmationCode}
+	};
+	const FString Content = SerializeJsonContent(ContentParams);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+```
+기존에 저장된 UserName과 이번에 획득한 확인 코드를 HTTP로 보내 AWS의 Lambda로 보내지게 된다.
+
+```mjs
+import { CognitoIdentityProviderClient, ConfirmSignUpCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+
+export const handler = async (event) => {
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+
+  const{ username,confirmationCode }= event;
+
+  const confrimSignUpInput = {
+    ClientId : process.env.CLIENT_ID,
+    Username : username,
+    ConfirmationCode : confirmationCode
+  };
+
+  const confirmSignUpCommand = new ConfirmSignUpCommand(confrimSignUpInput);
+
+  try{
+    const response = await cognitoIdentityProviderClient.send(confirmSignUpCommand);
+    return response;
+  }
+  catch(error){
+    return error;
+  }
+};
+
+```
+Lambda에서는 해당 UserName과 코드를 확인한후 결과가 담긴 값을 다시 Unreal엔진으로 보내게 된다.
+
+```C++
+void UPortalManager::Confirm_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		ConfirmStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			if (JsonObject->HasField(TEXT("name")))
+			{
+				FString Exception = JsonObject->GetStringField(TEXT("name"));
+				if (Exception.Equals(TEXT("CodeMismatchException")))
+				{
+					ConfirmStatusMessageDelegate.Broadcast(TEXT("Incorrect verification code."), true);
+					return;
+				}
+			}
+			ConfirmStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+			return;
+		}
+
+		OnConfirmSucceeded.Broadcast();
+	}
+}
+```
+Unreal엔진의 Response함수에서 해당 값을 받은후 올바르게 되었을경우 OnConfirmSucceeded델리게이트를 Broadcast하게 된다.
+
+![ScreenShot00018](https://github.com/user-attachments/assets/26dba947-a19d-4f67-b85d-5db90a5183b2)
+
+알맞은 코드가 들어왔을경우 코드 확인 UI가 뜨게 되고 버튼을 누르면 SignIn페이지로 돌아가 SignUp에서 사용한 Username과 Password를 사용해 게임에 접속할수 있게 만들었다.
+
+
+
 
 ## DynamoDB
 
