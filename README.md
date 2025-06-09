@@ -928,11 +928,145 @@ Unreal엔진의 Response함수에서 해당 값을 받은후 올바르게 되었
 알맞은 코드가 들어왔을경우 코드 확인 UI가 뜨게 되고 버튼을 누르면 SignIn페이지로 돌아가 SignUp에서 사용한 Username과 Password를 사용해 게임에 접속할수 있게 만들었다.
 
 
-
-
-## DynamoDB
-
 ## Carrer
+
+![ScreenShot00022](https://github.com/user-attachments/assets/01879c4a-9787-4260-aa61-1c01f05cf682)
+
+AWS의 DynamoDB기능과 Cognito기능을 같이 사용해 Player가 지금까지 play한 게임들의 스텟과 승리, 패배등을 Database에 저장해 엔진에서 요청시 AWS의 정보들을 엔진으로 보내 확인할수 있도록 하는 기능들이 있다.
+
+```mjs
+
+//계정 생성시 사후 확인 Lambda트리거를 사용해 해당 람다가 실행되게 된다.
+
+import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb"; // ES Modules import
+
+export const handler = async (event) => {
+
+  console.log(JSON.stringify(event));
+
+
+  if(event.triggerSource ==='PostConfirmation_ConfirmSignUp' )
+  {
+    const dynamoDBClient = new DynamoDBClient({region : process.env.REGION});
+
+    const username = event.userName;
+    const cognitosub = event.request.userAttributes.sub;
+    const email = event.request.userAttributes.email;
+
+    const putItemInput = {
+      TableName: "Players",
+      Item:{
+        "databaseid":{ S:cognitosub },
+        "username":{ S:username },
+        "email":{ S:email },
+      }
+    }
+    const putItemCommand = new PutItemCommand(putItemInput);
+    try{
+      const putItemResponse = await dynamoDBClient.send(putItemCommand);
+    }catch(error)
+    {
+      return error;
+    }
+  }
+  return event;
+};
+
+```
+먼저 플레이어의 계정이 만들어 지게 될경우 Cognito의 확장기능인 Lambda 트리거를 사용해 해당 계정의 sub, email, username등을 사용해 DynamoDB의 테이블을에 데이터들을 추가시켜 준다.
+
+```C++
+void UGameStatsManager::RetrieveMatchStats()
+{
+	RetrieveMatchStatsStatusMessage.Broadcast(TEXT("Retrieving match stats..."), false);
+	
+	UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem();
+	if (!IsValid(LocalPlayerSubSystem))
+	{
+		return;
+	}
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::RetrieveMatchStats);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::RetrieveMatchStats_Response);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	TMap<FString, FString> Params = {
+		{TEXT("accessToken"), LocalPlayerSubSystem->GetAuthResult().AccessToken}
+	};
+	const FString Content = SerializeJsonContent(Params);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+```
+이후에 해당 플레이어가 개인 Carrer를 확인하고 싶을때 해당 요청을 AWS로 보내게 되고 
+```mjs
+import { CognitoIdentityProviderClient, GetUserCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb"; // ES Modules import
+import {marshall,unmarshall} from "@aws-sdk/util-dynamodb";
+
+export const handler = async (event) => {
+  const cognitoClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+  const dynamoDBClient = new DynamoDBClient({region : process.env.REGION});
+
+  try{
+    const getUserCommand = new GetUserCommand({AccessToken: event.accessToken});
+    const getUserResponse = await cognitoClient.send(getUserCommand);
+    const sub = getUserResponse.UserAttributes.find(attribute => attribute.Name === "sub").Value;
+
+    const getItemInput = {
+      TableName : "Players",
+      Key: marshall( { databaseid : sub} )
+    };
+    const getItemCommand = new GetItemCommand(getItemInput);
+    const getItemResponse = await dynamoDBClient.send(getItemCommand);
+    const playerStats = getItemResponse.Item ? unmarshall(getItemResponse.Item) : {};
+
+    return playerStats;
+
+  }catch(error){
+    return error;
+  }
+
+};
+```
+
+AWS에서는 해당 Lambda가 실행된후 데이터 베이스에서 Player를 검색후 해당 Player의 데이터들을 Unreal엔진으로 보내주게 된다.
+
+```C++
+void UGameStatsManager::RetrieveMatchStats_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		OnRetrieveMatchStatsResponseReceived.Broadcast(FDSRetrieveMatchStatsResponse());
+		RetrieveMatchStatsStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
+		return;
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			OnRetrieveMatchStatsResponseReceived.Broadcast(FDSRetrieveMatchStatsResponse());
+			RetrieveMatchStatsStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
+			return;
+		}
+		FDSRetrieveMatchStatsResponse RetrieveMatchStatsResponse;
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &RetrieveMatchStatsResponse);
+		RetrieveMatchStatsResponse.Dump();
+
+		OnRetrieveMatchStatsResponseReceived.Broadcast(RetrieveMatchStatsResponse);
+		RetrieveMatchStatsStatusMessage.Broadcast(TEXT(""), false);
+	}
+}
+```
+해당 정보들은 Unreal엔진에서 다시 구조체의 형태로 변환한후 델리게이트를 통해 UI에게 보내지게 되고 해당 정보들을 토대로 각각의 Carrer들을 만들어 표시하게 된다.
+
 
 ## Leaderboard
 
