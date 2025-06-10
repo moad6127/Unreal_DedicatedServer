@@ -1068,6 +1068,50 @@ void UGameStatsManager::RetrieveMatchStats_Response(FHttpRequestPtr Request, FHt
 해당 정보들은 Unreal엔진에서 다시 구조체의 형태로 변환한후 델리게이트를 통해 UI에게 보내지게 되고 해당 정보들을 토대로 각각의 Carrer들을 만들어 표시하게 된다.
 
 
+```C++
+void UShooterCareerPage::OnRetrieveMatchStats(const FDSRetrieveMatchStatsResponse& RetrieveMatchStatsResponse)
+{
+	Super::OnRetrieveMatchStats(RetrieveMatchStatsResponse);
+
+	ScrollBox_Achievement->ClearChildren();
+
+	TMap<ESpecialElimType, int32> AchievementData;
+
+	if (RetrieveMatchStatsResponse.hits > 0) AchievementData.Emplace(ESpecialElimType::Hits, RetrieveMatchStatsResponse.hits);
+	if (RetrieveMatchStatsResponse.misses > 0) AchievementData.Emplace(ESpecialElimType::Misses, RetrieveMatchStatsResponse.misses);
+	if (RetrieveMatchStatsResponse.scoredElims > 0) AchievementData.Emplace(ESpecialElimType::ScoredElims, RetrieveMatchStatsResponse.scoredElims);
+	if (RetrieveMatchStatsResponse.defeats > 0) AchievementData.Emplace(ESpecialElimType::Defeats, RetrieveMatchStatsResponse.defeats);
+	if (RetrieveMatchStatsResponse.highestStreak > 0) AchievementData.Emplace(ESpecialElimType::Streak, RetrieveMatchStatsResponse.highestStreak);
+	if (RetrieveMatchStatsResponse.dethroneElims > 0) AchievementData.Emplace(ESpecialElimType::Dethrone, RetrieveMatchStatsResponse.dethroneElims);
+	if (RetrieveMatchStatsResponse.gotFirstBlood > 0) AchievementData.Emplace(ESpecialElimType::FirstBlood, RetrieveMatchStatsResponse.gotFirstBlood);
+	if (RetrieveMatchStatsResponse.revengeElims > 0) AchievementData.Emplace(ESpecialElimType::Revenge, RetrieveMatchStatsResponse.revengeElims);
+	if (RetrieveMatchStatsResponse.showstopperElims > 0) AchievementData.Emplace(ESpecialElimType::Showstopper, RetrieveMatchStatsResponse.showstopperElims);
+	if (RetrieveMatchStatsResponse.headShotElims > 0) AchievementData.Emplace(ESpecialElimType::Headshot, RetrieveMatchStatsResponse.headShotElims);
+	
+	check(SpecialElimData);
+
+	for (const TPair<ESpecialElimType, int32>& Pair : AchievementData)
+	{
+		const FString& CareerAchievementName = SpecialElimData->SpecialElimInfo.FindChecked(Pair.Key).CareerPageAchievementName;
+		UTexture2D* Icon = SpecialElimData->SpecialElimInfo.FindChecked(Pair.Key).ElimIcon;
+
+		UCareerAchievement* CareerAchievement = CreateWidget<UCareerAchievement>(this, CareerAchievementClass);
+		if (IsValid(CareerAchievement))
+		{
+			CareerAchievement->SetAchievementText(CareerAchievementName, Pair.Value);
+			if (Icon)
+			{
+				CareerAchievement->SetAchievementIcon(Icon);
+			}
+		}
+
+		ScrollBox_Achievement->AddChild(CareerAchievement);
+	}
+}
+```
+델리게이트의 boradcast를 통해서 들어온 데이터들을 각각 UI로 만들어서 스크롤 박스에 추가시켜 화면에 표시하도록 만든다.
+
+
 ## Leaderboard
 
 
