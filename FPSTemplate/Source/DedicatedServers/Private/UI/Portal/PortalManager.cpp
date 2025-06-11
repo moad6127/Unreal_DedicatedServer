@@ -178,7 +178,6 @@ void UPortalManager::Confirm_Response(FHttpRequestPtr Request, FHttpResponsePtr 
 
 		OnConfirmSucceeded.Broadcast();
 	}
-
 }
 
 void UPortalManager::RefreshTokens(const FString& RefreshToken)
