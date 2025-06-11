@@ -311,7 +311,7 @@ export const handler = async (event) => {
 
 ```
 
-해당 AWS의 Lambda를 통해 GameSession을 찾거나 새롭게 만들어서 언리얼 엔진의 C++의 Response 함수로 다시 들어오게 된다.
+해당 AWS의 Lambda를 서버가 존재할경우 ACTIVE 되어있는 GameSession을 찾거나 새롭게 만들어서 언리얼 엔진의 C++의 Response 함수로 다시 들어오게 된다.
 
 ```C++
 void UGameSessionsManager::FindOrCrateGameSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
@@ -341,20 +341,776 @@ void UGameSessionsManager::FindOrCrateGameSession_Response(FHttpRequestPtr Reque
 }
 ```
 
+Response함수를 통해서 받은 데이터들은 Lambda에서는 Json형태로 보내지만 Unreal엔진에서 Json형태로 사용하기 위해서는 Converter를 사용해 구조체 형태로 변형해 Response를 통해 얻은 정보를 저장하게 된다.
+
+``` C++
+void UGameSessionsManager::HandleGameSessionStatus(const FString& Status, const FString& SessionId)
+{
+	if (Status.Equals(TEXT("ACTIVE")))
+	{
+		BroadcastJoinGameSessionMessage.Broadcast(TEXT("Found active Game Session. Creating a Player Session..."), false);
+		
+		if (UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem(); IsValid(LocalPlayerSubSystem))
+		{
+			TryCreatePlayerSession(LocalPlayerSubSystem->UserName, SessionId);
+		}	
+	}
+	else if (Status.Equals(TEXT("ACTIVATING"))) // ACTIVATING 상태이면 잠시후 Join함수를 다시 실행하도록 만들기
+	{
+		FTimerDelegate CreateTimerDelegate;
+		CreateTimerDelegate.BindUObject(this, &UGameSessionsManager::JoinGameSession);
+		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+		if (IsValid(LocalPlayerController))
+		{
+			LocalPlayerController->GetWorldTimerManager().SetTimer(CreateSessionTimer, CreateTimerDelegate, 0.5f, false);
+		}
+	}
+	else
+	{
+		BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+
+}
+
+```
+이후 받은 Session정보들을 확인한후 ACTIVE상태일경우 PlyerSession을 생성하게 되고 ACTIVE상태가 아닐경우 타이머를 사용해 일정시간이 지난후 Join함수를 다시 호출하도록 만든다.
+
+``` C++
+void UGameSessionsManager::TryCreatePlayerSession(const FString& PlayerId, const FString& GameSessionId)
+{
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameSessionsManager::CreatePlayerSession_Response);
+
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameSessionsAPI::CreatePlayerSession);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	TMap<FString, FString> ContentParams = {
+		{TEXT("playerId"),PlayerId},
+		{TEXT("gameSessionId"),GameSessionId}
+	};
+
+	const FString Content = SerializeJsonContent(ContentParams);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+
+```
+PlayerSession을 생성하기 위해 다시한번 HTTP요청을 AWS로 보내게 되고 이때 필요한 정보들을 Json형태로 만든후 FJsonSerializer를 통해 AWS의 Lambda의 Event로 보내게 된다.
+
+```mjs
+// AWS 의 CreatePlayerSession Lambda함수
+
+import { GameLiftClient, CreatePlayerSessionCommand } from "@aws-sdk/client-gamelift"; // ES Modules import
+
+export const handler = async (event) => {
+
+
+  try{
+    const gameLiftClient = new GameLiftClient( {region : process.env.REGION } );
+    const createPlayerSessionInput = { 
+      GameSessionId: event.gameSessionId, 
+      PlayerId: event.playerId,
+      /*Location: "custom-home-desktop"*/ //remove this for EC2 fleets
+    };
+
+    const createPlayerSessionCommand = new CreatePlayerSessionCommand(createPlayerSessionInput);
+    const createPlayerSessionresponse = await gameLiftClient.send(createPlayerSessionCommand);
+
+    return createPlayerSessionresponse.PlayerSession;
+
+  }catch(error){
+    return error;
+  }
+};
+```
+AWS의 Lambda에서는 Unreal에서 받은 정보들을 사용해 PlayerSession을 만든후 만들어진 PlayerSession의 정보들을 다시 Unreal로 보내게 된다.
+
+```C++
+void UGameSessionsManager::CreatePlayerSession_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			BroadcastJoinGameSessionMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+		}
+
+		FDSPlayerSession PlayerSesssion;
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &PlayerSesssion);
+		PlayerSesssion.Dump();
+
+		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+		if (IsValid(LocalPlayerController))
+		{
+			FInputModeGameOnly InputMode;
+			LocalPlayerController->SetInputMode(InputMode);
+			LocalPlayerController->SetShowMouseCursor(false);
+		}
+
+		const FString Options = "?PlayerSessionId=" + PlayerSesssion.PlayerSessionId + "?Username=" + PlayerSesssion.PlayerId;
+
+		const FString IPAndPort = PlayerSesssion.IpAddress + TEXT(":") + FString::FromInt(PlayerSesssion.Port);
+		const FName Address(*IPAndPort);
+		UGameplayStatics::OpenLevel(this, Address, true, Options);
+	}
+}
+```
+
+![Lobby](https://github.com/user-attachments/assets/6e224308-2539-4c02-840f-6577dda3d7af)
+> LobbyMap으로 이동한 모습이다. Lobby로 들어온 Player들을 체크하고 일정한 수가 넘어가면 Countdown을 시작하도록 만든다.
+
+Unreal에서 AWS의 Lambda의 응답을 받게되면 Lambda를 통해 들어온 정보들을 다시 구조체의 형태로 변경한후 Game에 들어갈 준비를 한후 OpenLevel을 사용해 Map을 이동하게 된다.
+
+```C++
+void ADS_LobbyGameMode::PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
+{
+	Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
+
+	const FString PlayerSessionId = UGameplayStatics::ParseOption(Options, TEXT("PlayerSessionId"));
+	const FString Username = UGameplayStatics::ParseOption(Options, TEXT("Username"));
+
+	TryAcceptPlayerSession(PlayerSessionId, Username, ErrorMessage);
+
+}
+
+void ADS_LobbyGameMode::TryAcceptPlayerSession(const FString& PlayerSessionId, const FString& Username, FString& OutErrorMessage)
+{
+	if (PlayerSessionId.IsEmpty() || Username.IsEmpty())
+	{
+		OutErrorMessage = TEXT("PlayerSessionId and/or Username is empty");
+		return;
+	}
+	//
+#if WITH_GAMELIFT
+	Aws::GameLift::Server::Model::DescribePlayerSessionsRequest DescribePlayerSessionsRequest;
+	DescribePlayerSessionsRequest.SetPlayerSessionId(TCHAR_TO_ANSI(*PlayerSessionId));
+
+	const auto& DescribePlayerSessionsOutcome = Aws::GameLift::Server::DescribePlayerSessions(DescribePlayerSessionsRequest);
+	if (!DescribePlayerSessionsOutcome.IsSuccess())
+	{
+		OutErrorMessage = TEXT("DescribePlayerSessions Failed.");
+		return;
+	}
+
+	const auto& DescribePlayerSessionsResult = DescribePlayerSessionsOutcome.GetResult();
+	int32 Count = 0;
+	const Aws::GameLift::Server::Model::PlayerSession* PlayerSessions = DescribePlayerSessionsResult.GetPlayerSessions(Count);
+	if (PlayerSessions == nullptr || Count == 0)
+	{
+		OutErrorMessage = TEXT("GetPlayerSessions failed.");
+		return;
+	}
+
+
+	for (int32 i = 0; i < Count; i++)
+	{
+		const Aws::GameLift::Server::Model::PlayerSession& PlayerSession = PlayerSessions[i];
+		if (!Username.Equals(PlayerSession.GetPlayerId())) continue;
+		if (PlayerSession.GetStatus() != Aws::GameLift::Server::Model::PlayerSessionStatus::RESERVED)
+		{
+			OutErrorMessage = FString::Printf(TEXT("Session for %s not RESERVED; Fail PreLogin."), *Username);
+			return;
+		}
+
+		const auto& AcceptPlayerSessionOutcome = Aws::GameLift::Server::AcceptPlayerSession(TCHAR_TO_ANSI(*PlayerSessionId));
+		OutErrorMessage = AcceptPlayerSessionOutcome.IsSuccess() ? "" : FString::Printf(TEXT("Failed to accept player session for %s"), *Username);
+
+	}
+	//
+#endif
+}
+```
+이후 Player는 Lobby로 보내질 준비를 하게되고 Error가 발생하지 않게되면 PlayerSession을 바탕으로 Player를 Lobby로 받아들이게 된다.
+일정한 수의 Player가 Lobby에 들어오면 Countdown을 시작해 GameMap으로 이동을 시작해 Game을 Play할수 있게 된다.
+
+
 
 
 ## Cognito
 
 AWS에서는 게임에서 사용할수 있는 사용자들의 계정을 만들고 관리할수 있는 기능인 Cognito 기능이 존재해 해당 기능을 사용해서 게임에서 게임 계정을 만들고 AWS에서 관리하도록 만들수 있다.
 
+### SignIn
+
+![ScreenShot00007](https://github.com/user-attachments/assets/49cc867c-a20b-4339-850c-b321073c753c)
+> 만약 AWS의 Cognito계정이 존재할경우 아이디와 비밀번호를 입력해 접속할수 있도록 만들었다.
+
+```C++
+void UPortalManager::SignIn(const FString& UserName, const FString& Password)
+{
+	SignInStatusMessageDelegate.Broadcast(TEXT("SignIn in..."), false);
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &UPortalManager::SignIn_Response);
+
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::Portal::SignIn);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	LastUserName = UserName;
+	TMap<FString, FString> ContentParams = {
+		{TEXT("username"),UserName},
+		{TEXT("password"),Password}
+	};
+	const FString Content = SerializeJsonContent(ContentParams);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+```
+
+Http요청으로 AWS로 SignIn에 필요한 정보들을 보낸후 응답받도록 만들어진 함수들이다.
+응답에 성공하게 되면 PlayerSubsystem에 사용자에 필요한 토큰, 사용자 이메일등을 따로 저장해 사용할수 있도록 한다.
+
+```mjs
+import { CognitoIdentityProviderClient, InitiateAuthCommand, GetUserCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+
+export const handler = async (event) => {
+
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+
+  const { username, password,refreshToken } = event;
+  if(refreshToken){
+    const refreshTokensInput = {
+      AuthFlow: "REFRESH_TOKEN_AUTH",
+      ClientId: process.env.CLIENT_ID,
+      AuthParameters: {
+        REFRESH_TOKEN: refreshToken
+      }
+    };
+    const initiateAuthCommand = new InitiateAuthCommand(refreshTokensInput);
+    try{
+      const initiateAuthResponse = await cognitoIdentityProviderClient.send(initiateAuthCommand);
+      return initiateAuthResponse;
+    }
+    catch(error)
+    {
+      return error;
+    }
+    
+  }else{
+    const initateAutInput = {
+      AuthFlow: "USER_PASSWORD_AUTH",
+      ClientId: process.env.CLIENT_ID,
+      AuthParameters: {
+        USERNAME: username,
+        PASSWORD: password
+      }
+    };
+  
+    const initiateAuthCommand = new InitiateAuthCommand(initateAutInput);
+  
+    try{
+      const initiateAuthResponse = await cognitoIdentityProviderClient.send(initiateAuthCommand);
+
+      const getUserInput = {
+        AccessToken: initiateAuthResponse.AuthenticationResult.AccessToken
+      };
+      const getUserCommand = new GetUserCommand(getUserInput);
+      const getUserResponse = await cognitoIdentityProviderClient.send(getUserCommand);
+
+      let emailAtrribute;
+      for(const attribute of getUserResponse.UserAttributes){
+        if(attribute.Name === "email"){
+          emailAtrribute = attribute.Value;
+          break;
+        }
+      }
+      const response = {
+        ...initiateAuthResponse,
+        email: emailAtrribute
+      };
+
+      return response;
+    }
+    catch(error)
+    {
+      return error;
+    }
+  }
+
+
+};
+
+```
+Unreal 엔진의 SignIn함수를 통해서 보내진 ID와 Password를 통해서 Cognito계정에 접속을 하게된후 AccessToken과 Player의 Email을 다시 Response함수로 보내게 주는 Lambda이다.
+이때 ID와 Password대신 refreshToken이 들어온 경우 일정 시간이 지나 Token을 다시 받도록 하는 함수가 작동된것으로, 이 함수는 Timer를 사용해 일정시간마다 refreshToken을 보내 Token을 다시 받는다.
 
 
 
+```C++
+void UPortalManager::SignIn_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		SignInStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			SignInStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+			return;
+		}
+		FDSInitiateAuthResponse InitiateAuthResponse;
+
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &InitiateAuthResponse);
+		InitiateAuthResponse.Dump();
+
+		UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem();
+		if (IsValid(LocalPlayerSubSystem))
+		{
+			LocalPlayerSubSystem->InitializeTokens(InitiateAuthResponse.AuthenticationResult,this);
+			LocalPlayerSubSystem->UserName = LastUserName;
+			LocalPlayerSubSystem->Email = InitiateAuthResponse.email;
+		}
+
+		APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+		if (IsValid(LocalPlayerController))
+		{
+			if (IHUDManagement* HUDManagement = Cast<IHUDManagement>(LocalPlayerController->GetHUD()))
+			{
+				HUDManagement->OnSignIn();
+			}
+		}
+	}
+}
+```
+
+### SignUp
+
+![ScreenShot00011](https://github.com/user-attachments/assets/d303865d-a2fe-4d4c-ace1-46a7ad4dfe8f)
+
+Cognito계정을 Unreal엔진을 통해서 만들수 있도록 하는 것으로 사용할 Id, Password,Email을 Unreal의 Http로 AWS Cognito로 보내 사용자 계정을 만들도록 하는 방법이다.
+
+```C++
+void UPortalManager::SignUp(const FString& UserName, const FString& Password, const FString& Email)
+{
+	SignUpStatusMessageDelegate.Broadcast(TEXT("Creating a new account."), false);
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &UPortalManager::SignUp_Response);
+
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::Portal::SignUp);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	LastUserName = UserName;
+	TMap<FString, FString> ContentParams = {
+		{TEXT("username"),UserName},
+		{TEXT("password"),Password},
+		{TEXT("email"),Email}
+	};
+	const FString Content = SerializeJsonContent(ContentParams);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+```
+각각의 텍스트에 필요한 정보들을 넣어서 버튼을 누르게 되면 SignUp함수가 호출되며 각각의 정보들을 HTTP요청으로 보내게 된다.
+
+```mjs
+import { CognitoIdentityProviderClient, SignUpCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+
+export const handler = async (event) => {
+  
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+
+  const clientId = process.env.CLIENT_ID;
+
+  const{ username,password,email }= event;
+
+  const signUpInput = {
+    ClientId: clientId,
+    Username: username,
+    Password: password,
+    UserAttributes: [
+      {
+        Name: "email",
+        Value: email
+      }
+    ]
+  };
+
+  try{
+    const signUpCommand = new SignUpCommand(signUpInput);
+    const signUpResponse = await cognitoIdentityProviderClient.send(signUpCommand);
+  
+    return signUpResponse;
+  }catch(error)
+  {
+    return error;
+  }
+
+};
+```
+이러한 Lambda함수를 통해 새롭게 계정이 만들어 지게 된다.     
+
+```mjs
+import { CognitoIdentityProviderClient, ListUsersCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+
+export const handler = async (event) => {
+  const email = event.request.userAttributes.email;
+
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION });
+  const listUsersInput = {
+    UserPoolId : event.userPoolId,
+    Filter : `email = "${email}"`
+  }
+  const listUsersCommand = new ListUsersCommand(listUsersInput);
+
+  try{
+    const listUsersResponse = await cognitoIdentityProviderClient.send(listUsersCommand);
+    if(listUsersResponse.Users.length > 0)
+    {
+      throw new Error("A user with this email aleady exists.")
+    }
+    return event;
+  }catch(error){
+    console.error(error);
+    throw new Error(error.message);
+  }
+};
+
+```
+이때 사용자가 전해준 Email정보가 이미 존재할경우를 대비해 Cognito의 확장기능인 사전 가입 Lambda트리거를 사용해 SignUp이 되기전에 해당 Lambda를 실행해 이미 Email이 존재하는지 확인한다음 문제가 없을경우 다음단계로 넘어가게 된다.
+
+```C++
+void UPortalManager::SignUp_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		SignUpStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			SignUpStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+			return;
+		}
+
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &LastSignUpResponse);
+		OnSignUpSucceeded.Broadcast();
+	}
+
+}
+```
+계정 생성시 문제가 없을경우 HTTP의 응답함수에서 성공하게 되며 델리게이트를 통해 성공을 Broadcast하게 된다.
+
+```C++
+void USignInOverlay::OnSignUpSucceeded()
+{
+	SignUpPage->ClearTextBoxes();
+	SignUpPage->Button_SignUp->SetIsEnabled(true);
+	ConfirmSignUpPage->TextBlock_Destination->SetText(FText::FromString(PortalManager->LastSignUpResponse.CodeDeliveryDetails.Destination));
+	ShowConfirmPage();
+}
+```
+델리게이트가 broadcast됬을때 반응되는 함수로 각각의 TextBlock들의 내용을 지운후 Confirm Page로 넘어가게 된다.
 
 
-## DynamoDB
+### Confirm
+
+![ScreenShot00016](https://github.com/user-attachments/assets/64568038-a7f7-41f1-83d8-0088eee30ca9)
+
+SignUp버튼을 누르게 되면 SignUp에서 사용된 Email주소로 사용자의 확인 코드가 전해지게 된다.
+AWS에서는 UserPool을 만들때 확인할수 있는것들을 선택할수 있는데, 이때 Email로 선택할시 Email로 확인코드가 담긴 메일이 보내지고 이러한 확인코드를 다시 Unreal엔진에서 받아 HTTP요청을 보내 확인할수 있도록 한다.
+
+```C++
+void UPortalManager::Confirm(const FString& ConfirmationCode)
+{
+	check(APIData);
+	ConfirmStatusMessageDelegate.Broadcast(TEXT("Checking verification code..."), false);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &UPortalManager::Confirm_Response);
+
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::Portal::ConfirmSignUp);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("PUT"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	TMap<FString, FString> ContentParams = {
+		{TEXT("username"),LastUserName},
+		{TEXT("confirmationCode"),ConfirmationCode}
+	};
+	const FString Content = SerializeJsonContent(ContentParams);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+```
+기존에 저장된 UserName과 이번에 획득한 확인 코드를 HTTP로 보내 AWS의 Lambda로 보내지게 된다.
+
+```mjs
+import { CognitoIdentityProviderClient, ConfirmSignUpCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+
+export const handler = async (event) => {
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+
+  const{ username,confirmationCode }= event;
+
+  const confrimSignUpInput = {
+    ClientId : process.env.CLIENT_ID,
+    Username : username,
+    ConfirmationCode : confirmationCode
+  };
+
+  const confirmSignUpCommand = new ConfirmSignUpCommand(confrimSignUpInput);
+
+  try{
+    const response = await cognitoIdentityProviderClient.send(confirmSignUpCommand);
+    return response;
+  }
+  catch(error){
+    return error;
+  }
+};
+
+```
+Lambda에서는 해당 UserName과 코드를 확인한후 결과가 담긴 값을 다시 Unreal엔진으로 보내게 된다.
+
+```C++
+void UPortalManager::Confirm_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		ConfirmStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			if (JsonObject->HasField(TEXT("name")))
+			{
+				FString Exception = JsonObject->GetStringField(TEXT("name"));
+				if (Exception.Equals(TEXT("CodeMismatchException")))
+				{
+					ConfirmStatusMessageDelegate.Broadcast(TEXT("Incorrect verification code."), true);
+					return;
+				}
+			}
+			ConfirmStatusMessageDelegate.Broadcast(HTTPStatusMessage::SomethingWentWrong, true);
+			return;
+		}
+
+		OnConfirmSucceeded.Broadcast();
+	}
+}
+```
+Unreal엔진의 Response함수에서 해당 값을 받은후 올바르게 되었을경우 OnConfirmSucceeded델리게이트를 Broadcast하게 된다.
+
+![ScreenShot00018](https://github.com/user-attachments/assets/26dba947-a19d-4f67-b85d-5db90a5183b2)
+
+알맞은 코드가 들어왔을경우 코드 확인 UI가 뜨게 되고 버튼을 누르면 SignIn페이지로 돌아가 SignUp에서 사용한 Username과 Password를 사용해 게임에 접속할수 있게 만들었다.
+
 
 ## Carrer
+
+![ScreenShot00022](https://github.com/user-attachments/assets/01879c4a-9787-4260-aa61-1c01f05cf682)
+
+AWS의 DynamoDB기능과 Cognito기능을 같이 사용해 Player가 지금까지 play한 게임들의 스텟과 승리, 패배등을 Database에 저장해 엔진에서 요청시 AWS의 정보들을 엔진으로 보내 확인할수 있도록 하는 기능들이 있다.
+
+```mjs
+
+//계정 생성시 사후 확인 Lambda트리거를 사용해 해당 람다가 실행되게 된다.
+
+import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb"; // ES Modules import
+
+export const handler = async (event) => {
+
+  console.log(JSON.stringify(event));
+
+
+  if(event.triggerSource ==='PostConfirmation_ConfirmSignUp' )
+  {
+    const dynamoDBClient = new DynamoDBClient({region : process.env.REGION});
+
+    const username = event.userName;
+    const cognitosub = event.request.userAttributes.sub;
+    const email = event.request.userAttributes.email;
+
+    const putItemInput = {
+      TableName: "Players",
+      Item:{
+        "databaseid":{ S:cognitosub },
+        "username":{ S:username },
+        "email":{ S:email },
+      }
+    }
+    const putItemCommand = new PutItemCommand(putItemInput);
+    try{
+      const putItemResponse = await dynamoDBClient.send(putItemCommand);
+    }catch(error)
+    {
+      return error;
+    }
+  }
+  return event;
+};
+
+```
+먼저 플레이어의 계정이 만들어 지게 될경우 Cognito의 확장기능인 Lambda 트리거를 사용해 해당 계정의 sub, email, username등을 사용해 DynamoDB의 테이블을에 데이터들을 추가시켜 준다.
+
+```C++
+void UGameStatsManager::RetrieveMatchStats()
+{
+	RetrieveMatchStatsStatusMessage.Broadcast(TEXT("Retrieving match stats..."), false);
+	
+	UDSLocalPlayerSubssytem* LocalPlayerSubSystem = GetDSLocalPlayerSubSystem();
+	if (!IsValid(LocalPlayerSubSystem))
+	{
+		return;
+	}
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::RetrieveMatchStats);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::RetrieveMatchStats_Response);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	TMap<FString, FString> Params = {
+		{TEXT("accessToken"), LocalPlayerSubSystem->GetAuthResult().AccessToken}
+	};
+	const FString Content = SerializeJsonContent(Params);
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+```
+이후에 해당 플레이어가 개인 Carrer를 확인하고 싶을때 해당 요청을 AWS로 보내게 되고 
+```mjs
+import { CognitoIdentityProviderClient, GetUserCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb"; // ES Modules import
+import {marshall,unmarshall} from "@aws-sdk/util-dynamodb";
+
+export const handler = async (event) => {
+  const cognitoClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+  const dynamoDBClient = new DynamoDBClient({region : process.env.REGION});
+
+  try{
+    const getUserCommand = new GetUserCommand({AccessToken: event.accessToken});
+    const getUserResponse = await cognitoClient.send(getUserCommand);
+    const sub = getUserResponse.UserAttributes.find(attribute => attribute.Name === "sub").Value;
+
+    const getItemInput = {
+      TableName : "Players",
+      Key: marshall( { databaseid : sub} )
+    };
+    const getItemCommand = new GetItemCommand(getItemInput);
+    const getItemResponse = await dynamoDBClient.send(getItemCommand);
+    const playerStats = getItemResponse.Item ? unmarshall(getItemResponse.Item) : {};
+
+    return playerStats;
+
+  }catch(error){
+    return error;
+  }
+
+};
+```
+
+AWS에서는 해당 Lambda가 실행된후 데이터 베이스에서 Player를 검색후 해당 Player의 데이터들을 Unreal엔진으로 보내주게 된다.
+
+```C++
+void UGameStatsManager::RetrieveMatchStats_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		OnRetrieveMatchStatsResponseReceived.Broadcast(FDSRetrieveMatchStatsResponse());
+		RetrieveMatchStatsStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
+		return;
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			OnRetrieveMatchStatsResponseReceived.Broadcast(FDSRetrieveMatchStatsResponse());
+			RetrieveMatchStatsStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
+			return;
+		}
+		FDSRetrieveMatchStatsResponse RetrieveMatchStatsResponse;
+		FJsonObjectConverter::JsonObjectToUStruct(JsonObject.ToSharedRef(), &RetrieveMatchStatsResponse);
+		RetrieveMatchStatsResponse.Dump();
+
+		OnRetrieveMatchStatsResponseReceived.Broadcast(RetrieveMatchStatsResponse);
+		RetrieveMatchStatsStatusMessage.Broadcast(TEXT(""), false);
+	}
+}
+```
+해당 정보들은 Unreal엔진에서 다시 구조체의 형태로 변환한후 델리게이트를 통해 UI에게 보내지게 되고 해당 정보들을 토대로 각각의 Carrer들을 만들어 표시하게 된다.
+
+
+```C++
+void UShooterCareerPage::OnRetrieveMatchStats(const FDSRetrieveMatchStatsResponse& RetrieveMatchStatsResponse)
+{
+	Super::OnRetrieveMatchStats(RetrieveMatchStatsResponse);
+
+	ScrollBox_Achievement->ClearChildren();
+
+	TMap<ESpecialElimType, int32> AchievementData;
+
+	if (RetrieveMatchStatsResponse.hits > 0) AchievementData.Emplace(ESpecialElimType::Hits, RetrieveMatchStatsResponse.hits);
+	if (RetrieveMatchStatsResponse.misses > 0) AchievementData.Emplace(ESpecialElimType::Misses, RetrieveMatchStatsResponse.misses);
+	if (RetrieveMatchStatsResponse.scoredElims > 0) AchievementData.Emplace(ESpecialElimType::ScoredElims, RetrieveMatchStatsResponse.scoredElims);
+	if (RetrieveMatchStatsResponse.defeats > 0) AchievementData.Emplace(ESpecialElimType::Defeats, RetrieveMatchStatsResponse.defeats);
+	if (RetrieveMatchStatsResponse.highestStreak > 0) AchievementData.Emplace(ESpecialElimType::Streak, RetrieveMatchStatsResponse.highestStreak);
+	if (RetrieveMatchStatsResponse.dethroneElims > 0) AchievementData.Emplace(ESpecialElimType::Dethrone, RetrieveMatchStatsResponse.dethroneElims);
+	if (RetrieveMatchStatsResponse.gotFirstBlood > 0) AchievementData.Emplace(ESpecialElimType::FirstBlood, RetrieveMatchStatsResponse.gotFirstBlood);
+	if (RetrieveMatchStatsResponse.revengeElims > 0) AchievementData.Emplace(ESpecialElimType::Revenge, RetrieveMatchStatsResponse.revengeElims);
+	if (RetrieveMatchStatsResponse.showstopperElims > 0) AchievementData.Emplace(ESpecialElimType::Showstopper, RetrieveMatchStatsResponse.showstopperElims);
+	if (RetrieveMatchStatsResponse.headShotElims > 0) AchievementData.Emplace(ESpecialElimType::Headshot, RetrieveMatchStatsResponse.headShotElims);
+	
+	check(SpecialElimData);
+
+	for (const TPair<ESpecialElimType, int32>& Pair : AchievementData)
+	{
+		const FString& CareerAchievementName = SpecialElimData->SpecialElimInfo.FindChecked(Pair.Key).CareerPageAchievementName;
+		UTexture2D* Icon = SpecialElimData->SpecialElimInfo.FindChecked(Pair.Key).ElimIcon;
+
+		UCareerAchievement* CareerAchievement = CreateWidget<UCareerAchievement>(this, CareerAchievementClass);
+		if (IsValid(CareerAchievement))
+		{
+			CareerAchievement->SetAchievementText(CareerAchievementName, Pair.Value);
+			if (Icon)
+			{
+				CareerAchievement->SetAchievementIcon(Icon);
+			}
+		}
+
+		ScrollBox_Achievement->AddChild(CareerAchievement);
+	}
+}
+```
+델리게이트의 boradcast를 통해서 들어온 데이터들을 각각 UI로 만들어서 스크롤 박스에 추가시켜 화면에 표시하도록 만든다.
+
 
 ## Leaderboard
 
