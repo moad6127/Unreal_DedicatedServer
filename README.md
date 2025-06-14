@@ -20,7 +20,7 @@ AWS와 UE5를 연결하는 기능과 게임의 기능을 분리해서 다른 프
 
  * [DynamoDB](#DynamoDB)
 
- * [Carrer](#Carrer)
+ * [Career](#Career)
 
  * [Leaderboard](#Leaderboard)
 </p>
@@ -928,7 +928,7 @@ Unreal엔진의 Response함수에서 해당 값을 받은후 올바르게 되었
 알맞은 코드가 들어왔을경우 코드 확인 UI가 뜨게 되고 버튼을 누르면 SignIn페이지로 돌아가 SignUp에서 사용한 Username과 Password를 사용해 게임에 접속할수 있게 만들었다.
 
 
-## Carrer
+## Career
 
 ![ScreenShot00022](https://github.com/user-attachments/assets/01879c4a-9787-4260-aa61-1c01f05cf682)
 
@@ -1113,6 +1113,10 @@ void UShooterCareerPage::OnRetrieveMatchStats(const FDSRetrieveMatchStatsRespons
 
 
 ## Leaderboard
+
+![ScreenShot00000](https://github.com/user-attachments/assets/550986d8-798e-4a28-8737-3590fc4ee88b)
+
+Leaderboard Page를 만들어서 사용자들의 Wins의 순위를 정하고 화면에 표시할수 있도록 만들어져 있다.
 
 
 ----------------------------------------------------------------------------------------------------------------------------------
