@@ -930,6 +930,8 @@ Unreal엔진의 Response함수에서 해당 값을 받은후 올바르게 되었
 
 ## Career
 
+
+
 ![ScreenShot00022](https://github.com/user-attachments/assets/01879c4a-9787-4260-aa61-1c01f05cf682)
 
 AWS의 DynamoDB기능과 Cognito기능을 같이 사용해 Player가 지금까지 play한 게임들의 스텟과 승리, 패배등을 Database에 저장해 엔진에서 요청시 AWS의 정보들을 엔진으로 보내 확인할수 있도록 하는 기능들이 있다.
@@ -1110,6 +1112,138 @@ void UShooterCareerPage::OnRetrieveMatchStats(const FDSRetrieveMatchStatsRespons
 }
 ```
 델리게이트의 boradcast를 통해서 들어온 데이터들을 각각 UI로 만들어서 스크롤 박스에 추가시켜 화면에 표시하도록 만든다.
+
+게임의 Match가 끝났을 경우 Game에서 변경된 점들을 다시 AWS의 데이터로 보내주는 기능또한 가지고 있다.
+
+```C++
+void AMatchPlayerState::OnMatchEnded(const FString& Username)
+{
+	Super::OnMatchEnded(Username);
+
+	AMatchGameState* MatchGameState = Cast<AMatchGameState>(UGameplayStatics::GetGameState(this));
+	if (IsValid(MatchGameState))
+	{
+		bWinner = MatchGameState->GetLeader() == this;
+	}
+
+	FDSRecordMatchStatsInput RecordMatchStatsInput;
+	RecordMatchStatsInput.username = Username;
+
+	RecordMatchStatsInput.matchStats.ScoredElims = ScoredElims;
+	RecordMatchStatsInput.matchStats.defeats = Defeats;
+	RecordMatchStatsInput.matchStats.hits = Hits;
+	RecordMatchStatsInput.matchStats.misses = Misses;
+	RecordMatchStatsInput.matchStats.headShotElims = HeadShotElims;
+	RecordMatchStatsInput.matchStats.highestStreak = HighestStreak;
+	RecordMatchStatsInput.matchStats.revengeElims = RevengeElims;
+	RecordMatchStatsInput.matchStats.dethroneElims = DethroneElims;
+	RecordMatchStatsInput.matchStats.showstopperElims = ShowStopperElims;
+	RecordMatchStatsInput.matchStats.gotFirstBlood = bFirstBlood ? 1 : 0;
+	RecordMatchStatsInput.matchStats.matchWins = bWinner ? 1 : 0;
+	RecordMatchStatsInput.matchStats.matchLosses = bWinner ? 0 : 1;
+
+	RecordMatchStats(RecordMatchStatsInput);
+}
+```
+경기가 끝났을경우 해당 PlayerState의 함수에서 AWS로 보낼 Input들을 구조체 형식으로 저장하게 되고 HTTP요청을 통해 AWS로 데이터들을 보내게 된다.
+
+```C++
+void UGameStatsManager::RecordMatchStats(const FDSRecordMatchStatsInput& RecordMatchStatsInput)
+{
+	//TSharedPtr<FJsonObject> JsonObject = MakeShared<FJsonObject>();
+	//FJsonObjectConverter::UStructToJsonObject(FDSRecordMatchStatsInput::StaticStruct(), &RecordMatchStatsInput, JsonObject.ToSharedRef());
+
+	FString JsonString;
+	FJsonObjectConverter::UStructToJsonObjectString(FDSRecordMatchStatsInput::StaticStruct(), &RecordMatchStatsInput, JsonString);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::RecordMatchStats);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::RecordMatchStats_Response);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+	Request->SetContentAsString(JsonString);
+
+	Request->ProcessRequest();
+}
+```
+
+```mjs
+import { CognitoIdentityProviderClient, AdminGetUserCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+import { DynamoDBClient, GetItemCommand, PutItemCommand  } from "@aws-sdk/client-dynamodb"; // ES Modules import
+import { marshall,unmarshall } from "@aws-sdk/util-dynamodb";
+
+export const handler = async (event) => {
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+  const dynamoDBClient = new DynamoDBClient({region : process.env.REGION});
+
+  try{
+    const adminGetUserInput = {
+      Username : event.username,
+      UserPoolId:process.env.USER_POOL_ID
+    };
+    const adminGetUserCommand = new AdminGetUserCommand(adminGetUserInput);
+    const adminGetUserResponse = await cognitoIdentityProviderClient.send(adminGetUserCommand);
+
+    const sub = adminGetUserResponse.UserAttributes.find(attribute => attribute.Name === "sub").Value;
+    const email = adminGetUserResponse.UserAttributes.find(attribute => attribute.Name === "email").Value;
+
+    const getItemInput = {
+      TableName : "Players",
+      Key: marshall ({ databaseid  : sub}),
+    };
+
+    const getItemCommand = new GetItemCommand(getItemInput);
+    const dbResponse = await dynamoDBClient.send(getItemCommand);
+    let statsFromDB = unmarshall(dbResponse.Item);
+
+    const eventMatchStats = event.matchStats;
+
+    for(const key in eventMatchStats){
+      if(statsFromDB[key] !== undefined){
+        statsFromDB[key] += eventMatchStats[key];
+      } else{
+        statsFromDB[key] = eventMatchStats[key];
+      }
+    }
+
+    const putItemInput ={
+      TableName : "Players",
+      Item : marshall({...statsFromDB})
+    };
+    const putItemCommand  =new PutItemCommand(putItemInput);
+    await dynamoDBClient.send(putItemCommand);
+
+    return {
+      statusCode : 200,
+      body : `Update match stats for ${event.username}`
+    };
+  }catch(error)
+  {
+    return error;
+  }
+};
+
+```
+Unreal에서 받은 데이터들을 AWS의 DynamoDB의 데이터베이스에 추가시킨후 단순히 확인의 용도로 응답함수를 받게 된다.
+
+```C++
+void UGameStatsManager::RecordMatchStats_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Failed to send RecordMatchStats request"));
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		ContainsErrors(JsonObject);
+	}
+}
+```
+
 
 
 ## Leaderboard
