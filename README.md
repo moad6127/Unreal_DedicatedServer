@@ -1226,7 +1226,7 @@ export const handler = async (event) => {
 };
 
 ```
-Unreal에서 받은 데이터들을 AWS의 DynamoDB의 데이터베이스에 추가시킨후 단순히 확인의 용도로 응답함수를 받게 된다.
+Unreal에서 받은 데이터들을 AWS의 DynamoDB의 데이터베이스에 추가시킨후 단순히 확인의 용도로 Response함수를 받게 된다.
 
 ```C++
 void UGameStatsManager::RecordMatchStats_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
@@ -1243,7 +1243,7 @@ void UGameStatsManager::RecordMatchStats_Response(FHttpRequestPtr Request, FHttp
 	}
 }
 ```
-
+Response함수에서 문제가 존재할경우 Log등을 통해 Error를 식별하고 조치할수 있게 만들어 두었다.
 
 
 ## Leaderboard
@@ -1251,6 +1251,140 @@ void UGameStatsManager::RecordMatchStats_Response(FHttpRequestPtr Request, FHttp
 ![ScreenShot00000](https://github.com/user-attachments/assets/550986d8-798e-4a28-8737-3590fc4ee88b)
 
 Leaderboard Page를 만들어서 사용자들의 Wins의 순위를 정하고 화면에 표시할수 있도록 만들어져 있다.
+
+
+```C++
+void UGameStatsManager::RetrieveLeaderboard()
+{
+	RetrieveLeaderboardStatusMessage.Broadcast(TEXT("Retrieving Leaderboard..."),false);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::RetrieveLeaderboard);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::RetrieveLeaderboard_Response);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("GET"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	Request->ProcessRequest();
+}
+```
+Page를 클릭해 화면에 표시하게 되면 Show함수가 호출되고 Show함수에서 Leaderboard를 Retrieve하는 HTTP함수를 호출해 AWS로 보내게 된다.
+
+```mjs
+import {DynamoDBClient , ScanCommand} from "@aws-sdk/client-dynamodb";
+import {unmarshall} from "@aws-sdk/util-dynamodb";
+
+export const handler = async (event) => {
+
+    const dynamoDBClient = new DynamoDBClient({ region: process.env.REGION });
+    const scanCommand = new ScanCommand({
+        TableName: "Leaderboard"
+    });
+
+    try{
+        const scanResponse = await dynamoDBClient.send(scanCommand);
+        const leaderboard = scanResponse.Items.map(item => unmarshall(item));
+        return {Leaderboard : leaderboard};
+    }catch(error){
+        return error
+    }
+
+
+};
+
+```
+
+AWS에서는 Leaderboard의 데이터베이스에서 저장된 username과 match의 승리횟수등을 return하게 된다.
+
+```C++
+void UGameStatsManager::RetrieveLeaderboard_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		RetrieveLeaderboardStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
+		UE_LOG(LogDedicatedServers, Error, TEXT("Falied to retrieve leaderboard."));
+		return;
+	}
+	TArray<FDSLeaderboardItem> LeaderboardItems;
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			RetrieveLeaderboardStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
+			return;
+		}
+		const TArray<TSharedPtr<FJsonValue>>* LeaderboardJsonArray;
+		if (JsonObject->TryGetArrayField(TEXT("Leaderboard"), LeaderboardJsonArray))
+		{
+			for (const TSharedPtr<FJsonValue>& ItemValue : *LeaderboardJsonArray)
+			{
+				TSharedPtr<FJsonObject> ItemObject = ItemValue->AsObject();
+				if (ItemObject.IsValid())
+				{
+					FDSLeaderboardItem Item;
+					if (FJsonObjectConverter::JsonObjectToUStruct(ItemObject.ToSharedRef(), &Item))
+					{
+						LeaderboardItems.Add(Item);
+					}
+					else
+					{
+						UE_LOG(LogDedicatedServers, Error, TEXT("Falied to parse leaderboard item."));
+					}
+				}
+			}
+		}
+	}
+	OnRetrieveLeaderboard.Broadcast(LeaderboardItems);
+	RetrieveLeaderboardStatusMessage.Broadcast(TEXT(""), false);
+}
+```
+응답 함수에서 받은 데이터들은 구조체 형식으로 변환된후 vector에 Add하게 된후 모든 데이터들 받게되면 델리게이트를 통해 Leaderboard의 순위를 결정하기 위해 UI클래스로 넘어가게 된다.
+
+```C++
+void ULeaderboardPage::PopulateLeaderboard(TArray<FDSLeaderboardItem>& Leaderboard)
+{
+	ScrollBox_Leaderboard->ClearChildren();
+
+	CalculateLeaderboardPlaces(Leaderboard);
+
+	for (const FDSLeaderboardItem& Item : Leaderboard)
+	{
+		ULeaderboardCard* LeaderboardCard = CreateWidget<ULeaderboardCard>(this, LeaderboardCardClass);
+		if (IsValid(LeaderboardCard))
+		{
+			LeaderboardCard->SetPlayerInfo(Item.username, Item.matchWins, Item.place);
+			ScrollBox_Leaderboard->AddChild(LeaderboardCard);
+		}
+	}
+}
+
+void ULeaderboardPage::CalculateLeaderboardPlaces(TArray<FDSLeaderboardItem>& OutLeaderboard)
+{
+	OutLeaderboard.Sort([](const FDSLeaderboardItem& A, const FDSLeaderboardItem& B)
+		{
+			return A.matchWins > B.matchWins;
+		});
+
+	// assign place based on wins, accounting for ties;
+	int32 CurrentRank = 1;
+	for (int32 i = 0; i < OutLeaderboard.Num(); i++)
+	{
+		if (i > 0 && OutLeaderboard[i].matchWins == OutLeaderboard[i - 1].matchWins)
+		{
+			//만약 Win이 같을경우 동일한 Rank부여
+			OutLeaderboard[i].place = OutLeaderboard[i - 1].place;
+		}
+		else
+		{
+			OutLeaderboard[i].place = CurrentRank++;
+		}
+	}
+}
+```
+순위를 결정하기 위해 MatchWin에 따라서 들어온 Vector를 정렬하게 되고 정렬된 순서에 따라서 Rank를 부여해 PlayerCard클래스에 보내준후 해당 클래스를 ScrollBox에 추가해 화면에 표시하게 된다.
 
 
 ----------------------------------------------------------------------------------------------------------------------------------
