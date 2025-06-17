@@ -18,8 +18,6 @@ AWS와 UE5를 연결하는 기능과 게임의 기능을 분리해서 다른 프
 
  * [Cognito](#Cognito)
 
- * [DynamoDB](#DynamoDB)
-
  * [Career](#Career)
 
  * [Leaderboard](#Leaderboard)
@@ -1388,6 +1386,3 @@ void ULeaderboardPage::CalculateLeaderboardPlaces(TArray<FDSLeaderboardItem>& Ou
 
 
 ----------------------------------------------------------------------------------------------------------------------------------
-
-
-//EC2 Fleet를 만들기 2025 3 27
