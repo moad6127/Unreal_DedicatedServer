@@ -6,7 +6,8 @@ AWS의 Cognito기능과 DynamoDB기능을 사용해 사용자 풀을 만들고 �
 
 AWS와 UE5를 연결하는 기능과 게임의 기능을 분리해서 다른 프로젝트에 쉽게 AWS기능을 사용할수 있도록 만들어져 있다.
 
-![ScreenShot00001](https://github.com/user-attachments/assets/2d7fb616-ef0f-4187-98cf-1df779ada75a)
+![Career](https://github.com/user-attachments/assets/12ef9ffb-f8db-40c8-82ae-bc96caf4eb76)
+
 
 
 <details><summary> 구분</summary>
@@ -17,8 +18,6 @@ AWS와 UE5를 연결하는 기능과 게임의 기능을 분리해서 다른 프
  * [Session](#Session)
 
  * [Cognito](#Cognito)
-
- * [DynamoDB](#DynamoDB)
 
  * [Career](#Career)
 
@@ -930,6 +929,8 @@ Unreal엔진의 Response함수에서 해당 값을 받은후 올바르게 되었
 
 ## Career
 
+
+
 ![ScreenShot00022](https://github.com/user-attachments/assets/01879c4a-9787-4260-aa61-1c01f05cf682)
 
 AWS의 DynamoDB기능과 Cognito기능을 같이 사용해 Player가 지금까지 play한 게임들의 스텟과 승리, 패배등을 Database에 저장해 엔진에서 요청시 AWS의 정보들을 엔진으로 보내 확인할수 있도록 하는 기능들이 있다.
@@ -1111,6 +1112,138 @@ void UShooterCareerPage::OnRetrieveMatchStats(const FDSRetrieveMatchStatsRespons
 ```
 델리게이트의 boradcast를 통해서 들어온 데이터들을 각각 UI로 만들어서 스크롤 박스에 추가시켜 화면에 표시하도록 만든다.
 
+게임의 Match가 끝났을 경우 Game에서 변경된 점들을 다시 AWS의 데이터로 보내주는 기능또한 가지고 있다.
+
+```C++
+void AMatchPlayerState::OnMatchEnded(const FString& Username)
+{
+	Super::OnMatchEnded(Username);
+
+	AMatchGameState* MatchGameState = Cast<AMatchGameState>(UGameplayStatics::GetGameState(this));
+	if (IsValid(MatchGameState))
+	{
+		bWinner = MatchGameState->GetLeader() == this;
+	}
+
+	FDSRecordMatchStatsInput RecordMatchStatsInput;
+	RecordMatchStatsInput.username = Username;
+
+	RecordMatchStatsInput.matchStats.ScoredElims = ScoredElims;
+	RecordMatchStatsInput.matchStats.defeats = Defeats;
+	RecordMatchStatsInput.matchStats.hits = Hits;
+	RecordMatchStatsInput.matchStats.misses = Misses;
+	RecordMatchStatsInput.matchStats.headShotElims = HeadShotElims;
+	RecordMatchStatsInput.matchStats.highestStreak = HighestStreak;
+	RecordMatchStatsInput.matchStats.revengeElims = RevengeElims;
+	RecordMatchStatsInput.matchStats.dethroneElims = DethroneElims;
+	RecordMatchStatsInput.matchStats.showstopperElims = ShowStopperElims;
+	RecordMatchStatsInput.matchStats.gotFirstBlood = bFirstBlood ? 1 : 0;
+	RecordMatchStatsInput.matchStats.matchWins = bWinner ? 1 : 0;
+	RecordMatchStatsInput.matchStats.matchLosses = bWinner ? 0 : 1;
+
+	RecordMatchStats(RecordMatchStatsInput);
+}
+```
+경기가 끝났을경우 해당 PlayerState의 함수에서 AWS로 보낼 Input들을 구조체 형식으로 저장하게 되고 HTTP요청을 통해 AWS로 데이터들을 보내게 된다.
+
+```C++
+void UGameStatsManager::RecordMatchStats(const FDSRecordMatchStatsInput& RecordMatchStatsInput)
+{
+	//TSharedPtr<FJsonObject> JsonObject = MakeShared<FJsonObject>();
+	//FJsonObjectConverter::UStructToJsonObject(FDSRecordMatchStatsInput::StaticStruct(), &RecordMatchStatsInput, JsonObject.ToSharedRef());
+
+	FString JsonString;
+	FJsonObjectConverter::UStructToJsonObjectString(FDSRecordMatchStatsInput::StaticStruct(), &RecordMatchStatsInput, JsonString);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::RecordMatchStats);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::RecordMatchStats_Response);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+	Request->SetContentAsString(JsonString);
+
+	Request->ProcessRequest();
+}
+```
+
+```mjs
+import { CognitoIdentityProviderClient, AdminGetUserCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+import { DynamoDBClient, GetItemCommand, PutItemCommand  } from "@aws-sdk/client-dynamodb"; // ES Modules import
+import { marshall,unmarshall } from "@aws-sdk/util-dynamodb";
+
+export const handler = async (event) => {
+  const cognitoIdentityProviderClient = new CognitoIdentityProviderClient({region : process.env.REGION});
+  const dynamoDBClient = new DynamoDBClient({region : process.env.REGION});
+
+  try{
+    const adminGetUserInput = {
+      Username : event.username,
+      UserPoolId:process.env.USER_POOL_ID
+    };
+    const adminGetUserCommand = new AdminGetUserCommand(adminGetUserInput);
+    const adminGetUserResponse = await cognitoIdentityProviderClient.send(adminGetUserCommand);
+
+    const sub = adminGetUserResponse.UserAttributes.find(attribute => attribute.Name === "sub").Value;
+    const email = adminGetUserResponse.UserAttributes.find(attribute => attribute.Name === "email").Value;
+
+    const getItemInput = {
+      TableName : "Players",
+      Key: marshall ({ databaseid  : sub}),
+    };
+
+    const getItemCommand = new GetItemCommand(getItemInput);
+    const dbResponse = await dynamoDBClient.send(getItemCommand);
+    let statsFromDB = unmarshall(dbResponse.Item);
+
+    const eventMatchStats = event.matchStats;
+
+    for(const key in eventMatchStats){
+      if(statsFromDB[key] !== undefined){
+        statsFromDB[key] += eventMatchStats[key];
+      } else{
+        statsFromDB[key] = eventMatchStats[key];
+      }
+    }
+
+    const putItemInput ={
+      TableName : "Players",
+      Item : marshall({...statsFromDB})
+    };
+    const putItemCommand  =new PutItemCommand(putItemInput);
+    await dynamoDBClient.send(putItemCommand);
+
+    return {
+      statusCode : 200,
+      body : `Update match stats for ${event.username}`
+    };
+  }catch(error)
+  {
+    return error;
+  }
+};
+
+```
+Unreal에서 받은 데이터들을 AWS의 DynamoDB의 데이터베이스에 추가시킨후 단순히 확인의 용도로 Response함수를 받게 된다.
+
+```C++
+void UGameStatsManager::RecordMatchStats_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Failed to send RecordMatchStats request"));
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		ContainsErrors(JsonObject);
+	}
+}
+```
+Response함수에서 문제가 존재할경우 Log등을 통해 Error를 식별하고 조치할수 있게 만들어 두었다.
+
 
 ## Leaderboard
 
@@ -1119,7 +1252,138 @@ void UShooterCareerPage::OnRetrieveMatchStats(const FDSRetrieveMatchStatsRespons
 Leaderboard Page를 만들어서 사용자들의 Wins의 순위를 정하고 화면에 표시할수 있도록 만들어져 있다.
 
 
+```C++
+void UGameStatsManager::RetrieveLeaderboard()
+{
+	RetrieveLeaderboardStatusMessage.Broadcast(TEXT("Retrieving Leaderboard..."),false);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::RetrieveLeaderboard);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::RetrieveLeaderboard_Response);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("GET"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	Request->ProcessRequest();
+}
+```
+Page를 클릭해 화면에 표시하게 되면 Show함수가 호출되고 Show함수에서 Leaderboard를 Retrieve하는 HTTP함수를 호출해 AWS로 보내게 된다.
+
+```mjs
+import {DynamoDBClient , ScanCommand} from "@aws-sdk/client-dynamodb";
+import {unmarshall} from "@aws-sdk/util-dynamodb";
+
+export const handler = async (event) => {
+
+    const dynamoDBClient = new DynamoDBClient({ region: process.env.REGION });
+    const scanCommand = new ScanCommand({
+        TableName: "Leaderboard"
+    });
+
+    try{
+        const scanResponse = await dynamoDBClient.send(scanCommand);
+        const leaderboard = scanResponse.Items.map(item => unmarshall(item));
+        return {Leaderboard : leaderboard};
+    }catch(error){
+        return error
+    }
+
+
+};
+
+```
+
+AWS에서는 Leaderboard의 데이터베이스에서 저장된 username과 match의 승리횟수등을 return하게 된다.
+
+```C++
+void UGameStatsManager::RetrieveLeaderboard_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		RetrieveLeaderboardStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
+		UE_LOG(LogDedicatedServers, Error, TEXT("Falied to retrieve leaderboard."));
+		return;
+	}
+	TArray<FDSLeaderboardItem> LeaderboardItems;
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			RetrieveLeaderboardStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
+			return;
+		}
+		const TArray<TSharedPtr<FJsonValue>>* LeaderboardJsonArray;
+		if (JsonObject->TryGetArrayField(TEXT("Leaderboard"), LeaderboardJsonArray))
+		{
+			for (const TSharedPtr<FJsonValue>& ItemValue : *LeaderboardJsonArray)
+			{
+				TSharedPtr<FJsonObject> ItemObject = ItemValue->AsObject();
+				if (ItemObject.IsValid())
+				{
+					FDSLeaderboardItem Item;
+					if (FJsonObjectConverter::JsonObjectToUStruct(ItemObject.ToSharedRef(), &Item))
+					{
+						LeaderboardItems.Add(Item);
+					}
+					else
+					{
+						UE_LOG(LogDedicatedServers, Error, TEXT("Falied to parse leaderboard item."));
+					}
+				}
+			}
+		}
+	}
+	OnRetrieveLeaderboard.Broadcast(LeaderboardItems);
+	RetrieveLeaderboardStatusMessage.Broadcast(TEXT(""), false);
+}
+```
+응답 함수에서 받은 데이터들은 구조체 형식으로 변환된후 vector에 Add하게 된후 모든 데이터들 받게되면 델리게이트를 통해 Leaderboard의 순위를 결정하기 위해 UI클래스로 넘어가게 된다.
+
+```C++
+void ULeaderboardPage::PopulateLeaderboard(TArray<FDSLeaderboardItem>& Leaderboard)
+{
+	ScrollBox_Leaderboard->ClearChildren();
+
+	CalculateLeaderboardPlaces(Leaderboard);
+
+	for (const FDSLeaderboardItem& Item : Leaderboard)
+	{
+		ULeaderboardCard* LeaderboardCard = CreateWidget<ULeaderboardCard>(this, LeaderboardCardClass);
+		if (IsValid(LeaderboardCard))
+		{
+			LeaderboardCard->SetPlayerInfo(Item.username, Item.matchWins, Item.place);
+			ScrollBox_Leaderboard->AddChild(LeaderboardCard);
+		}
+	}
+}
+
+void ULeaderboardPage::CalculateLeaderboardPlaces(TArray<FDSLeaderboardItem>& OutLeaderboard)
+{
+	OutLeaderboard.Sort([](const FDSLeaderboardItem& A, const FDSLeaderboardItem& B)
+		{
+			return A.matchWins > B.matchWins;
+		});
+
+	// assign place based on wins, accounting for ties;
+	int32 CurrentRank = 1;
+	for (int32 i = 0; i < OutLeaderboard.Num(); i++)
+	{
+		if (i > 0 && OutLeaderboard[i].matchWins == OutLeaderboard[i - 1].matchWins)
+		{
+			//만약 Win이 같을경우 동일한 Rank부여
+			OutLeaderboard[i].place = OutLeaderboard[i - 1].place;
+		}
+		else
+		{
+			OutLeaderboard[i].place = CurrentRank++;
+		}
+	}
+}
+```
+순위를 결정하기 위해 MatchWin에 따라서 들어온 Vector를 정렬하게 되고 정렬된 순서에 따라서 Rank를 부여해 PlayerCard클래스에 보내준후 해당 클래스를 ScrollBox에 추가해 화면에 표시하게 된다.
+
+
 ----------------------------------------------------------------------------------------------------------------------------------
-
-
-//EC2 Fleet를 만들기 2025 3 27
