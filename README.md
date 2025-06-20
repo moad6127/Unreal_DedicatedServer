@@ -1385,5 +1385,62 @@ void ULeaderboardPage::CalculateLeaderboardPlaces(TArray<FDSLeaderboardItem>& Ou
 ```
 순위를 결정하기 위해 MatchWin에 따라서 들어온 Vector를 정렬하게 되고 정렬된 순서에 따라서 Rank를 부여해 PlayerCard클래스에 보내준후 해당 클래스를 ScrollBox에 추가해 화면에 표시하게 된다.
 
+Leaderboard또한 Game이 종료되었을때 Update하는 기능이 존재 하고 있다.
+
+```C++
+void AShooterGameModeBase::OnMatchEnded()
+{
+	Super::OnMatchEnded();
+
+	TArray<FString> LeaderIds;
+	if (AMatchGameState* MatchGameState = GetGameState<AMatchGameState>(); IsValid(MatchGameState))
+	{
+		TArray<AMatchPlayerState*> Leaders = MatchGameState->GetLeaders();
+		for (AMatchPlayerState* Leader : Leaders)
+		{
+			if (ADSPlayerController* LeaderPC = Cast<ADSPlayerController>(Leader->GetPlayerController());IsValid(LeaderPC))
+			{
+				LeaderIds.Add(LeaderPC->Username);
+			}
+		}
+	}
+	UpdateLeaderboard(LeaderIds);
+}
+```
+GameMode에서 경기 시간이 종료되었을때 호출되는 함수로 GameState에 저장된 Game의 Leader들을 모아서 Update함수로 넘겨주게 된다.
+```C++
+void UGameStatsManager::UpdateLeaderboard(const TArray<FString>& WinnerUsername)
+{
+
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::UpdateLeaderboard);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::UpdateLeaderboard_Response);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject());
+	TArray<TSharedPtr<FJsonValue>> PlayerIdArray;
+
+	for (const FString& Username : WinnerUsername)
+	{
+		PlayerIdArray.Add(MakeShareable(new FJsonValueString(Username)));
+	}
+	JsonObject->SetArrayField(TEXT("playerIds"), PlayerIdArray);
+	FString Content;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Content);
+	FJsonSerializer::Serialize(JsonObject.ToSharedRef(), Writer);
+
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+```
+Update함수에서는 GameState에서 획득한 Leader들을 FJsonObject형태로 구성한후 HTTP요청을 통해 AWS에게 보내주게 된다.
+
+
+
 
 ----------------------------------------------------------------------------------------------------------------------------------
