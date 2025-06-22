@@ -19,9 +19,11 @@ AWS와 UE5를 연결하는 기능과 게임의 기능을 분리해서 다른 프
 
  * [Cognito](#Cognito)
 
+ * [Leaderboard](#Leaderboard)
+
  * [Career](#Career)
 
- * [Leaderboard](#Leaderboard)
+
 </p>
 </details>
 <br/> <br>
@@ -927,6 +929,310 @@ Unreal엔진의 Response함수에서 해당 값을 받은후 올바르게 되었
 알맞은 코드가 들어왔을경우 코드 확인 UI가 뜨게 되고 버튼을 누르면 SignIn페이지로 돌아가 SignUp에서 사용한 Username과 Password를 사용해 게임에 접속할수 있게 만들었다.
 
 
+## Leaderboard
+
+![ScreenShot00000](https://github.com/user-attachments/assets/550986d8-798e-4a28-8737-3590fc4ee88b)
+
+Leaderboard Page를 만들어서 사용자들의 Wins의 순위를 정하고 화면에 표시할수 있도록 만들어져 있다.
+
+
+```C++
+void UGameStatsManager::RetrieveLeaderboard()
+{
+	RetrieveLeaderboardStatusMessage.Broadcast(TEXT("Retrieving Leaderboard..."),false);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::RetrieveLeaderboard);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::RetrieveLeaderboard_Response);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("GET"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	Request->ProcessRequest();
+}
+```
+Page를 클릭해 화면에 표시하게 되면 Show함수가 호출되고 Show함수에서 Leaderboard를 Retrieve하는 HTTP함수를 호출해 AWS로 보내게 된다.
+
+```mjs
+import {DynamoDBClient , ScanCommand} from "@aws-sdk/client-dynamodb";
+import {unmarshall} from "@aws-sdk/util-dynamodb";
+
+export const handler = async (event) => {
+
+    const dynamoDBClient = new DynamoDBClient({ region: process.env.REGION });
+    const scanCommand = new ScanCommand({
+        TableName: "Leaderboard"
+    });
+
+    try{
+        const scanResponse = await dynamoDBClient.send(scanCommand);
+        const leaderboard = scanResponse.Items.map(item => unmarshall(item));
+        return {Leaderboard : leaderboard};
+    }catch(error){
+        return error
+    }
+
+
+};
+
+```
+
+AWS에서는 Leaderboard의 데이터베이스에서 저장된 username과 match의 승리횟수등을 return하게 된다.
+
+```C++
+void UGameStatsManager::RetrieveLeaderboard_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		RetrieveLeaderboardStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
+		UE_LOG(LogDedicatedServers, Error, TEXT("Falied to retrieve leaderboard."));
+		return;
+	}
+	TArray<FDSLeaderboardItem> LeaderboardItems;
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			RetrieveLeaderboardStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
+			return;
+		}
+		const TArray<TSharedPtr<FJsonValue>>* LeaderboardJsonArray;
+		if (JsonObject->TryGetArrayField(TEXT("Leaderboard"), LeaderboardJsonArray))
+		{
+			for (const TSharedPtr<FJsonValue>& ItemValue : *LeaderboardJsonArray)
+			{
+				TSharedPtr<FJsonObject> ItemObject = ItemValue->AsObject();
+				if (ItemObject.IsValid())
+				{
+					FDSLeaderboardItem Item;
+					if (FJsonObjectConverter::JsonObjectToUStruct(ItemObject.ToSharedRef(), &Item))
+					{
+						LeaderboardItems.Add(Item);
+					}
+					else
+					{
+						UE_LOG(LogDedicatedServers, Error, TEXT("Falied to parse leaderboard item."));
+					}
+				}
+			}
+		}
+	}
+	OnRetrieveLeaderboard.Broadcast(LeaderboardItems);
+	RetrieveLeaderboardStatusMessage.Broadcast(TEXT(""), false);
+}
+```
+응답 함수에서 받은 데이터들은 구조체 형식으로 변환된후 vector에 Add하게 된후 모든 데이터들 받게되면 델리게이트를 통해 Leaderboard의 순위를 결정하기 위해 UI클래스로 넘어가게 된다.
+
+```C++
+void ULeaderboardPage::PopulateLeaderboard(TArray<FDSLeaderboardItem>& Leaderboard)
+{
+	ScrollBox_Leaderboard->ClearChildren();
+
+	CalculateLeaderboardPlaces(Leaderboard);
+
+	for (const FDSLeaderboardItem& Item : Leaderboard)
+	{
+		ULeaderboardCard* LeaderboardCard = CreateWidget<ULeaderboardCard>(this, LeaderboardCardClass);
+		if (IsValid(LeaderboardCard))
+		{
+			LeaderboardCard->SetPlayerInfo(Item.username, Item.matchWins, Item.place);
+			ScrollBox_Leaderboard->AddChild(LeaderboardCard);
+		}
+	}
+}
+
+void ULeaderboardPage::CalculateLeaderboardPlaces(TArray<FDSLeaderboardItem>& OutLeaderboard)
+{
+	OutLeaderboard.Sort([](const FDSLeaderboardItem& A, const FDSLeaderboardItem& B)
+		{
+			return A.matchWins > B.matchWins;
+		});
+
+	// assign place based on wins, accounting for ties;
+	int32 CurrentRank = 1;
+	for (int32 i = 0; i < OutLeaderboard.Num(); i++)
+	{
+		if (i > 0 && OutLeaderboard[i].matchWins == OutLeaderboard[i - 1].matchWins)
+		{
+			//만약 Win이 같을경우 동일한 Rank부여
+			OutLeaderboard[i].place = OutLeaderboard[i - 1].place;
+		}
+		else
+		{
+			OutLeaderboard[i].place = CurrentRank++;
+		}
+	}
+}
+```
+순위를 결정하기 위해 MatchWin에 따라서 들어온 Vector를 정렬하게 되고 정렬된 순서에 따라서 Rank를 부여해 PlayerCard클래스에 보내준후 해당 클래스를 ScrollBox에 추가해 화면에 표시하게 된다.
+
+Leaderboard또한 Game이 종료되었을때 Update하는 기능이 존재 하고 있다.
+
+```C++
+void AShooterGameModeBase::OnMatchEnded()
+{
+	Super::OnMatchEnded();
+
+	TArray<FString> LeaderIds;
+	if (AMatchGameState* MatchGameState = GetGameState<AMatchGameState>(); IsValid(MatchGameState))
+	{
+		TArray<AMatchPlayerState*> Leaders = MatchGameState->GetLeaders();
+		for (AMatchPlayerState* Leader : Leaders)
+		{
+			if (ADSPlayerController* LeaderPC = Cast<ADSPlayerController>(Leader->GetPlayerController());IsValid(LeaderPC))
+			{
+				LeaderIds.Add(LeaderPC->Username);
+			}
+		}
+	}
+	UpdateLeaderboard(LeaderIds);
+}
+```
+GameMode에서 경기 시간이 종료되었을때 호출되는 함수로 GameState에 저장된 Game의 Leader들을 모아서 Update함수로 넘겨주게 된다.
+```C++
+void UGameStatsManager::UpdateLeaderboard(const TArray<FString>& WinnerUsername)
+{
+
+	check(APIData);
+
+	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::UpdateLeaderboard);
+	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::UpdateLeaderboard_Response);
+
+	Request->SetURL(APIUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+	TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject());
+	TArray<TSharedPtr<FJsonValue>> PlayerIdArray;
+
+	for (const FString& Username : WinnerUsername)
+	{
+		PlayerIdArray.Add(MakeShareable(new FJsonValueString(Username)));
+	}
+	JsonObject->SetArrayField(TEXT("playerIds"), PlayerIdArray);
+	FString Content;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Content);
+	FJsonSerializer::Serialize(JsonObject.ToSharedRef(), Writer);
+
+	Request->SetContentAsString(Content);
+	Request->ProcessRequest();
+}
+```
+Update함수에서는 GameState에서 획득한 Leader들을 FJsonObject형태로 구성한후 HTTP요청을 통해 AWS에게 보내주게 된다.
+
+```mjs
+import { CognitoIdentityProviderClient, AdminGetUserCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
+import { DynamoDBClient, GetItemCommand, PutItemCommand, ScanCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
+import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
+
+const cognitoClient = new CognitoIdentityProviderClient({ region: process.env.REGION  });
+const dynamoDBClient = new DynamoDBClient({ region: process.env.REGION  });
+
+export const handler = async (event) => {
+  
+  // array of username from the match
+  const playerIds = event.playerIds;
+  const userPoolId = process.env.USER_POOL_ID;
+
+  try{
+  // retrieve player data (cognito sub ids)
+  const playerData = await retrievePlayerData(playerIds, userPoolId)
+  // retrieve player current wins
+  const updatedPlayerData = await retrieveCurrentWins(playerData);
+  
+  // add winers leaderboard
+  await updateLeaderboard(updatedPlayerData);
+  // ensure only top 20 players
+ await ensureTop20Players();
+  return {
+    statusCode: 200,
+    body: "Leaderboard updated successfully"
+  };
+
+  }catch(error){
+
+    return error;
+  }
+
+};
+
+async function retrievePlayerData(playerIds, userPoolId){
+  return await Promise.all(playerIds.map(async (playerId) => {
+    const adminGetUserCommand  =new AdminGetUserCommand({
+      Username: playerId,
+      UserPoolId: userPoolId,
+    });
+    const adminGetUserResponse = await cognitoClient.send(adminGetUserCommand);
+    const databaseId = adminGetUserResponse.UserAttributes.find(attr => attr.Name ==="sub").Value;
+    return {playerId, databaseId};
+  }));
+}
+
+async function retrieveCurrentWins(playerData){
+  return await Promise.all(playerData.map( async (player) => {
+    const getItemCommand = new GetItemCommand({
+      TableName: "Players",
+      Key : marshall( { databaseid : player.databaseId} ),
+    });
+    const getItemResponse = await dynamoDBClient.send(getItemCommand);
+    const playerItem = getItemResponse.Item ? unmarshall(getItemResponse.Item) : {};
+
+    let numWins = playerItem.matchWins || 0;
+    numWins += 1;
+
+    return {...player, wins : numWins || 0 };
+  }));
+}
+
+async function updateLeaderboard(playerData){
+  return await Promise.all(playerData.map(async (player) => {
+    const putItemCommand = new PutItemCommand({
+      TableName: "Leaderboard",
+      Item : marshall({
+        databaseid : player.databaseId,
+        username : player.playerId,
+        matchWins : player.wins
+      })
+    });
+    const putItemResponse = await dynamoDBClient.send(putItemCommand);
+    return putItemResponse.Item ? unmarshall(putItemResponse.Item) : {};
+  }));
+}
+
+async function ensureTop20Players(){
+  const scanCommand = new ScanCommand({
+    TableName: "Leaderboard"
+  });
+  const scanResponse = await dynamoDBClient.send(scanCommand);
+  const leaderboardItems = scanResponse.Items.map(item => unmarshall(item));
+
+  // sort player by win in descending order
+  leaderboardItems.sort((a, b) => b.matchWins - a.matchWins);
+  const top20Players = leaderboardItems.slice(0, 20);
+  const playersToRemove = leaderboardItems.slice(20);
+
+  const deletePromises = playersToRemove.map(player => {
+    const deleteItemCommand = new DeleteItemCommand({
+      TableName: "Leaderboard",
+      Key: marshall({ databaseid: player.databaseId })
+    });
+    return dynamoDBClient.send(deleteItemCommand);
+  });
+  await Promise.all(deletePromises);
+}
+
+```
+AWS의 Lambda에서는 가장먼저 Player의 StatData를 확인후 Unreal을 통해 들어온 데이터들을 합쳐서 Update하게 된다.
+이후에 Update된 Data들을 확인한후 상위 20명의 Player들을 체크해 Leaderboard Database에 저장하는 로직을 가지고 있다.
+
+
+
+----------------------------------------------------------------------------------------------------------------------------------
+
 ## Career
 
 
@@ -1245,306 +1551,3 @@ void UGameStatsManager::RecordMatchStats_Response(FHttpRequestPtr Request, FHttp
 Response함수에서 문제가 존재할경우 Log등을 통해 Error를 식별하고 조치할수 있게 만들어 두었다.
 
 
-## Leaderboard
-
-![ScreenShot00000](https://github.com/user-attachments/assets/550986d8-798e-4a28-8737-3590fc4ee88b)
-
-Leaderboard Page를 만들어서 사용자들의 Wins의 순위를 정하고 화면에 표시할수 있도록 만들어져 있다.
-
-
-```C++
-void UGameStatsManager::RetrieveLeaderboard()
-{
-	RetrieveLeaderboardStatusMessage.Broadcast(TEXT("Retrieving Leaderboard..."),false);
-
-	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
-	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::RetrieveLeaderboard);
-	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::RetrieveLeaderboard_Response);
-
-	Request->SetURL(APIUrl);
-	Request->SetVerb(TEXT("GET"));
-	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
-
-	Request->ProcessRequest();
-}
-```
-Page를 클릭해 화면에 표시하게 되면 Show함수가 호출되고 Show함수에서 Leaderboard를 Retrieve하는 HTTP함수를 호출해 AWS로 보내게 된다.
-
-```mjs
-import {DynamoDBClient , ScanCommand} from "@aws-sdk/client-dynamodb";
-import {unmarshall} from "@aws-sdk/util-dynamodb";
-
-export const handler = async (event) => {
-
-    const dynamoDBClient = new DynamoDBClient({ region: process.env.REGION });
-    const scanCommand = new ScanCommand({
-        TableName: "Leaderboard"
-    });
-
-    try{
-        const scanResponse = await dynamoDBClient.send(scanCommand);
-        const leaderboard = scanResponse.Items.map(item => unmarshall(item));
-        return {Leaderboard : leaderboard};
-    }catch(error){
-        return error
-    }
-
-
-};
-
-```
-
-AWS에서는 Leaderboard의 데이터베이스에서 저장된 username과 match의 승리횟수등을 return하게 된다.
-
-```C++
-void UGameStatsManager::RetrieveLeaderboard_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
-{
-	if (!bWasSuccessful)
-	{
-		RetrieveLeaderboardStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
-		UE_LOG(LogDedicatedServers, Error, TEXT("Falied to retrieve leaderboard."));
-		return;
-	}
-	TArray<FDSLeaderboardItem> LeaderboardItems;
-	TSharedPtr<FJsonObject> JsonObject;
-	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
-	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
-	{
-		if (ContainsErrors(JsonObject))
-		{
-			RetrieveLeaderboardStatusMessage.Broadcast(HTTPStatusMessage::SomethingWentWrong, false);
-			return;
-		}
-		const TArray<TSharedPtr<FJsonValue>>* LeaderboardJsonArray;
-		if (JsonObject->TryGetArrayField(TEXT("Leaderboard"), LeaderboardJsonArray))
-		{
-			for (const TSharedPtr<FJsonValue>& ItemValue : *LeaderboardJsonArray)
-			{
-				TSharedPtr<FJsonObject> ItemObject = ItemValue->AsObject();
-				if (ItemObject.IsValid())
-				{
-					FDSLeaderboardItem Item;
-					if (FJsonObjectConverter::JsonObjectToUStruct(ItemObject.ToSharedRef(), &Item))
-					{
-						LeaderboardItems.Add(Item);
-					}
-					else
-					{
-						UE_LOG(LogDedicatedServers, Error, TEXT("Falied to parse leaderboard item."));
-					}
-				}
-			}
-		}
-	}
-	OnRetrieveLeaderboard.Broadcast(LeaderboardItems);
-	RetrieveLeaderboardStatusMessage.Broadcast(TEXT(""), false);
-}
-```
-응답 함수에서 받은 데이터들은 구조체 형식으로 변환된후 vector에 Add하게 된후 모든 데이터들 받게되면 델리게이트를 통해 Leaderboard의 순위를 결정하기 위해 UI클래스로 넘어가게 된다.
-
-```C++
-void ULeaderboardPage::PopulateLeaderboard(TArray<FDSLeaderboardItem>& Leaderboard)
-{
-	ScrollBox_Leaderboard->ClearChildren();
-
-	CalculateLeaderboardPlaces(Leaderboard);
-
-	for (const FDSLeaderboardItem& Item : Leaderboard)
-	{
-		ULeaderboardCard* LeaderboardCard = CreateWidget<ULeaderboardCard>(this, LeaderboardCardClass);
-		if (IsValid(LeaderboardCard))
-		{
-			LeaderboardCard->SetPlayerInfo(Item.username, Item.matchWins, Item.place);
-			ScrollBox_Leaderboard->AddChild(LeaderboardCard);
-		}
-	}
-}
-
-void ULeaderboardPage::CalculateLeaderboardPlaces(TArray<FDSLeaderboardItem>& OutLeaderboard)
-{
-	OutLeaderboard.Sort([](const FDSLeaderboardItem& A, const FDSLeaderboardItem& B)
-		{
-			return A.matchWins > B.matchWins;
-		});
-
-	// assign place based on wins, accounting for ties;
-	int32 CurrentRank = 1;
-	for (int32 i = 0; i < OutLeaderboard.Num(); i++)
-	{
-		if (i > 0 && OutLeaderboard[i].matchWins == OutLeaderboard[i - 1].matchWins)
-		{
-			//만약 Win이 같을경우 동일한 Rank부여
-			OutLeaderboard[i].place = OutLeaderboard[i - 1].place;
-		}
-		else
-		{
-			OutLeaderboard[i].place = CurrentRank++;
-		}
-	}
-}
-```
-순위를 결정하기 위해 MatchWin에 따라서 들어온 Vector를 정렬하게 되고 정렬된 순서에 따라서 Rank를 부여해 PlayerCard클래스에 보내준후 해당 클래스를 ScrollBox에 추가해 화면에 표시하게 된다.
-
-Leaderboard또한 Game이 종료되었을때 Update하는 기능이 존재 하고 있다.
-
-```C++
-void AShooterGameModeBase::OnMatchEnded()
-{
-	Super::OnMatchEnded();
-
-	TArray<FString> LeaderIds;
-	if (AMatchGameState* MatchGameState = GetGameState<AMatchGameState>(); IsValid(MatchGameState))
-	{
-		TArray<AMatchPlayerState*> Leaders = MatchGameState->GetLeaders();
-		for (AMatchPlayerState* Leader : Leaders)
-		{
-			if (ADSPlayerController* LeaderPC = Cast<ADSPlayerController>(Leader->GetPlayerController());IsValid(LeaderPC))
-			{
-				LeaderIds.Add(LeaderPC->Username);
-			}
-		}
-	}
-	UpdateLeaderboard(LeaderIds);
-}
-```
-GameMode에서 경기 시간이 종료되었을때 호출되는 함수로 GameState에 저장된 Game의 Leader들을 모아서 Update함수로 넘겨주게 된다.
-```C++
-void UGameStatsManager::UpdateLeaderboard(const TArray<FString>& WinnerUsername)
-{
-
-	check(APIData);
-
-	TSharedRef<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
-	const FString APIUrl = APIData->GetAPIEndPoint(DedicatedServersTag::GameStatsAPI::UpdateLeaderboard);
-	Request->OnProcessRequestComplete().BindUObject(this, &UGameStatsManager::UpdateLeaderboard_Response);
-
-	Request->SetURL(APIUrl);
-	Request->SetVerb(TEXT("POST"));
-	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
-
-	TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject());
-	TArray<TSharedPtr<FJsonValue>> PlayerIdArray;
-
-	for (const FString& Username : WinnerUsername)
-	{
-		PlayerIdArray.Add(MakeShareable(new FJsonValueString(Username)));
-	}
-	JsonObject->SetArrayField(TEXT("playerIds"), PlayerIdArray);
-	FString Content;
-	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Content);
-	FJsonSerializer::Serialize(JsonObject.ToSharedRef(), Writer);
-
-	Request->SetContentAsString(Content);
-	Request->ProcessRequest();
-}
-```
-Update함수에서는 GameState에서 획득한 Leader들을 FJsonObject형태로 구성한후 HTTP요청을 통해 AWS에게 보내주게 된다.
-
-```mjs
-import { CognitoIdentityProviderClient, AdminGetUserCommand } from "@aws-sdk/client-cognito-identity-provider"; // ES Modules import
-import { DynamoDBClient, GetItemCommand, PutItemCommand, ScanCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
-import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
-
-const cognitoClient = new CognitoIdentityProviderClient({ region: process.env.REGION  });
-const dynamoDBClient = new DynamoDBClient({ region: process.env.REGION  });
-
-export const handler = async (event) => {
-  
-  // array of username from the match
-  const playerIds = event.playerIds;
-  const userPoolId = process.env.USER_POOL_ID;
-
-  try{
-  // retrieve player data (cognito sub ids)
-  const playerData = await retrievePlayerData(playerIds, userPoolId)
-  // retrieve player current wins
-  const updatedPlayerData = await retrieveCurrentWins(playerData);
-  
-  // add winers leaderboard
-  await updateLeaderboard(updatedPlayerData);
-  // ensure only top 20 players
- await ensureTop20Players();
-  return {
-    statusCode: 200,
-    body: "Leaderboard updated successfully"
-  };
-
-  }catch(error){
-
-    return error;
-  }
-
-};
-
-async function retrievePlayerData(playerIds, userPoolId){
-  return await Promise.all(playerIds.map(async (playerId) => {
-    const adminGetUserCommand  =new AdminGetUserCommand({
-      Username: playerId,
-      UserPoolId: userPoolId,
-    });
-    const adminGetUserResponse = await cognitoClient.send(adminGetUserCommand);
-    const databaseId = adminGetUserResponse.UserAttributes.find(attr => attr.Name ==="sub").Value;
-    return {playerId, databaseId};
-  }));
-}
-
-async function retrieveCurrentWins(playerData){
-  return await Promise.all(playerData.map( async (player) => {
-    const getItemCommand = new GetItemCommand({
-      TableName: "Players",
-      Key : marshall( { databaseid : player.databaseId} ),
-    });
-    const getItemResponse = await dynamoDBClient.send(getItemCommand);
-    const playerItem = getItemResponse.Item ? unmarshall(getItemResponse.Item) : {};
-
-    let numWins = playerItem.matchWins || 0;
-    numWins += 1;
-
-    return {...player, wins : numWins || 0 };
-  }));
-}
-
-async function updateLeaderboard(playerData){
-  return await Promise.all(playerData.map(async (player) => {
-    const putItemCommand = new PutItemCommand({
-      TableName: "Leaderboard",
-      Item : marshall({
-        databaseid : player.databaseId,
-        username : player.playerId,
-        matchWins : player.wins
-      })
-    });
-    const putItemResponse = await dynamoDBClient.send(putItemCommand);
-    return putItemResponse.Item ? unmarshall(putItemResponse.Item) : {};
-  }));
-}
-
-async function ensureTop20Players(){
-  const scanCommand = new ScanCommand({
-    TableName: "Leaderboard"
-  });
-  const scanResponse = await dynamoDBClient.send(scanCommand);
-  const leaderboardItems = scanResponse.Items.map(item => unmarshall(item));
-
-  // sort player by win in descending order
-  leaderboardItems.sort((a, b) => b.matchWins - a.matchWins);
-  const top20Players = leaderboardItems.slice(0, 20);
-  const playersToRemove = leaderboardItems.slice(20);
-
-  const deletePromises = playersToRemove.map(player => {
-    const deleteItemCommand = new DeleteItemCommand({
-      TableName: "Leaderboard",
-      Key: marshall({ databaseid: player.databaseId })
-    });
-    return dynamoDBClient.send(deleteItemCommand);
-  });
-  await Promise.all(deletePromises);
-}
-
-```
-AWS의 Lambda에서는 가장먼저 Player의 StatData를 확인후 Unreal을 통해 들어온 데이터들을 합쳐서 Update하게 된다.
-이후에 Update된 Data들을 확인한후 상위 20명의 Player들을 체크해 Leaderboard Database에 저장하는 로직을 가지고 있다.
-
-
-
-----------------------------------------------------------------------------------------------------------------------------------
