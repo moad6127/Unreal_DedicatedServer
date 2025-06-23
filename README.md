@@ -1229,6 +1229,51 @@ async function ensureTop20Players(){
 AWS의 Lambda에서는 가장먼저 Player의 StatData를 확인후 Unreal을 통해 들어온 데이터들을 합쳐서 Update하게 된다.
 이후에 Update된 Data들을 확인한후 상위 20명의 Player들을 체크해 Leaderboard Database에 저장하는 로직을 가지고 있다.
 
+```C++
+void UGameStatsManager::UpdateLeaderboard_Response(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful)
+	{
+		return;
+	}
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> JsonReader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (FJsonSerializer::Deserialize(JsonReader, JsonObject))
+	{
+		if (ContainsErrors(JsonObject))
+		{
+			return;
+		}
+	}
+	OnUpdateLeaderboardSucceeded.Broadcast();
+}
+```
+AWS에서 작업이 완료되면 Unreal엔진에서 Response함수가 호출된다.
+해당 작업이 Error없이 작업이 완료되면 OnUpdateLeaderboardSucceeded델리게이트가 Broadcast하게 되며 해당 작업으로 다음단계로 넘어가게 된다.
+
+```C++
+void ADS_MatchGameMode::OnLeaderboardUpdated()
+{
+	EndMatchForPlayerStates();
+}
+
+void ADS_MatchGameMode::EndMatchForPlayerStates()
+{
+	for (FConstPlayerControllerIterator iterator = GetWorld()->GetPlayerControllerIterator(); iterator; ++iterator)
+	{
+		ADSPlayerController* DSPlayerController = Cast<ADSPlayerController>(iterator->Get());
+		if (IsValid(DSPlayerController))
+		{
+			ADS_MatchPlayerState* MatchPlayerState = DSPlayerController->GetPlayerState<ADS_MatchPlayerState>();
+			if (IsValid(MatchPlayerState))
+			{
+				MatchPlayerState->OnMatchEnded(DSPlayerController->Username);
+			}
+		}
+	}
+}
+```
+OnUpdateLeaderboardSucceeded델리게이트가 Broadcast하였을때 이벤트 되는 함수로 해당 함수들을 통해 Career에 경기의 Stat을 Record하도록 진행된된다.
 
 
 ----------------------------------------------------------------------------------------------------------------------------------
